@@ -1,6 +1,6 @@
-# 🤖 AI 量化交易系统
+# 🤖 LLM-TradeBot
 
-基于 LLM (DeepSeek) 的智能量化交易系统,支持多时间框架数据分析、技术指标计算、特征工程和自动化交易决策。
+基于 LLM (DeepSeek) 的智能多 Agent 量化交易机器人,支持多时间框架同步、多 Agent 协作决策、技术指标自动计算及交易全链路审计。
 
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -10,11 +10,13 @@
 ## 🚀 快速开始
 
 ### 1. 安装依赖
+
 ```bash
 pip install -r requirements.txt
 ```
 
 ### 2. 配置环境
+
 ```bash
 # 复制环境变量模板
 cp .env.example .env
@@ -24,286 +26,107 @@ cp .env.example .env
 ```
 
 ### 3. 配置交易参数
+
 ```bash
 # 复制配置文件模板
 cp config.example.yaml config.yaml
-
-# 编辑配置文件
-vim config.yaml
 ```
 
-### 4. 运行实盘交易
+### 4. 运行交易程序
+
 ```bash
-python run_live_trading.py
+# 测试模式 (模拟执行)
+python main.py --test --mode continuous
+
+# 实盘模式 (谨慎运行)
+python main.py --mode continuous
 ```
 
 ---
 
 ## 📁 项目结构
 
-```
-ai_trader/
+```text
+LLM-TradeBot/
 ├── src/                    # 核心源代码
+│   ├── agents/            # 多 Agent 定义 (DataSync, Quant, Decision, Risk)
 │   ├── api/               # Binance API 客户端
 │   ├── execution/         # 交易执行引擎
 │   ├── features/          # 特征工程模块
 │   ├── monitoring/        # 监控和日志
 │   ├── risk/              # 风险管理
 │   ├── strategy/          # LLM 决策引擎
-│   └── utils/             # 工具函数
+│   └── utils/             # 工具函数 (DataSaver, TradeLogger 等)
 │
 ├── tests/                 # 单元测试
 ├── config/                # 配置文件
-├── docs_organized/        # 项目文档 (157 个文件)
-├── research/              # 研究和回测
-├── data/                  # 数据存储
-├── logs/                  # 日志文件
+├── docs_organized/        # 项目文档
+├── data/                  # 结构化数据存储 (按 Agent 归档)
+├── logs/                  # 系统运行日志
 │
-├── main.py                # 主程序入口
-├── run_live_trading.py    # 实盘交易脚本
+├── main.py                # 统一程序入口 (Multi-Agent 循环)
 └── requirements.txt       # Python 依赖
 ```
 
 ---
 
-## 🎯 核心功能
+## 🎯 核心架构 (Multi-Agent Flow)
 
-### 数据处理管道
-- **Step 1**: K线数据获取 (多时间框架: 5m, 15m, 1h, 4h, 1d)
-- **Step 2**: 技术指标计算 (MACD, RSI, Bollinger Bands, ATR, OBV 等)
-- **Step 3**: 特征工程 (数据归一化、特征组合)
-- **Step 4**: 数据质量检查
-- **Step 5**: LLM 提示生成
-- **Step 6**: LLM 智能决策
-- **Step 7**: 交易信号输出
+系统由多个专业 Agent 协作完成交易全流程：
 
-### 技术特性
-- ✅ 多时间框架数据对齐
-- ✅ 完整的技术指标库
-- ✅ LLM 驱动的智能决策
-- ✅ 风险管理和仓位控制
-- ✅ 完整的数据归档 (Parquet + Stats)
-- ✅ 详细的日志系统
-- ✅ 实时交易执行
-
-### 支持的交易对
-- BTCUSDT (主要)
-- 可扩展到其他币安合约交易对
+1. **🕵️ DataSyncAgent**: 异步并发获取多周期 (5m, 15m, 1h) K线数据，确保时间对齐。
+2. **👨‍🔬 QuantAnalystAgent**:
+   - 计算全量技术指标 (EMA, MACD, RSI, ATR 等)。
+   - 提取 50+ 特征及生成量化分析上下文。
+3. **⚖️ DecisionCoreAgent**:
+   - 整合多周期趋势与震荡信号。
+   - 结合 DeepSeek LLM 进行智能决策增强。
+4. **🛡️ RiskAuditAgent**: 执行严格的风险审查（仓位、止损、杠杆、市场流动性）。
+5. **🚀 ExecutionEngine**: 负责交易信号的最终执行及全生命周期追踪。
 
 ---
 
-## 📚 文档
+## 📄 数据全链路审计
 
-### 入门文档
-- [快速开始指南](docs_organized/01_快速开始/QUICK_START.md)
-- [配置指南](docs_organized/02_配置指南/CONFIG_GUIDE.md)
-- [系统架构](docs_organized/03_架构设计/ARCHITECTURE.md)
+系统自动将每一循环的中间过程记录在 `data/` 目录下，方便复盘和调试：
 
-### 实盘交易
-- [实盘交易快速开始](docs_organized/07_实盘交易/LIVE_TRADING_QUICKSTART.md)
-- [实盘交易安全指南](docs_organized/07_实盘交易/LIVE_TRADING_SAFETY_GUIDE.md)
-- [止盈止损指南](docs_organized/07_实盘交易/STOP_LOSS_TAKE_PROFIT_GUIDE.md)
-
-### 完整文档
-- [文档导航](DOCS_README.md) - 所有文档的导航指南
-- [完整文档索引](docs_organized/README.md) - 157 个文档的详细索引
-- [文档分类摘要](docs_organized/SUMMARY.md) - 按分类查看文档
-
----
-
-## 🔧 技术栈
-
-### 核心依赖
-- **Python**: 3.11+
-- **Binance API**: 币安合约交易
-- **DeepSeek API**: LLM 决策引擎
-- **pandas**: 数据处理
-- **numpy**: 数值计算
-- **ta-lib**: 技术指标
-- **pyarrow**: 数据存储
-
-### 技术指标
-- MACD (Moving Average Convergence Divergence)
-- RSI (Relative Strength Index)
-- Bollinger Bands
-- ATR (Average True Range)
-- OBV (On-Balance Volume)
-- EMA/SMA (Exponential/Simple Moving Average)
-
----
-
-## ⚙️ 配置说明
-
-### 环境变量 (.env)
-```bash
-# Binance API
-BINANCE_API_KEY=your_api_key
-BINANCE_API_SECRET=your_api_secret
-
-# DeepSeek API
-DEEPSEEK_API_KEY=your_deepseek_key
-
-# 交易模式
-TRADING_MODE=testnet  # 或 production
-```
-
-### 配置文件 (config.yaml)
-```yaml
-trading:
-  symbol: BTCUSDT
-  timeframe: 5m
-  leverage: 1
-  risk_per_trade: 0.01
-
-strategy:
-  model: deepseek-chat
-  temperature: 0.1
-  max_tokens: 500
-
-risk:
-  max_position_size: 1000
-  stop_loss_pct: 0.02
-  take_profit_pct: 0.04
+```text
+data/
+├── data_sync_agent/       # 原始多周期 K 线 (JSON/CSV/Parquet)
+├── quant_analyst_agent/   # 加工数据
+│   ├── indicators/        # 全量技术指标 DataFrames
+│   ├── features/          # 提取的特征快照
+│   └── context/           # 量化分析摘要 (JSON)
+├── decision_core_agent/   # 决策逻辑
+│   ├── llm_logs/          # LLM 输入上下文及 voting 过程 (Markdown)
+│   └── decisions/         # 最终加权投票结果 (JSON)
+└── execution_engine/      # 执行追踪
+    ├── orders/            # 单笔交易记录
+    └── tracking/          # TradeLogger 详细追踪日志
 ```
 
 ---
 
-## 🔒 安全提示
+## 🛡️ 安全提示
 
 ⚠️ **重要安全措施**:
 
-1. **API 密钥**: 妥善保管,不要提交到版本控制
-2. **测试网先行**: 先在测试网测试,确认无误后再上生产
-3. **风险控制**: 设置合理的止损和仓位大小
-4. **监控系统**: 密切监控交易日志和账户状态
-5. **IP 白名单**: 建议为 API 密钥设置 IP 白名单
-
----
-
-## 📊 数据归档
-
-系统自动归档所有步骤的数据:
-
-```
-data/
-├── step1/                 # K线数据 (Parquet + Stats)
-├── step2/                 # 技术指标 (Parquet + Stats)
-├── step3/                 # 特征数据 (Parquet + Stats)
-├── step4/                 # 质量检查 (JSON)
-├── step5/                 # LLM 提示 (TXT)
-├── step6/                 # LLM 决策 (JSON)
-└── step7/                 # 交易信号 (JSON)
-```
-
-每个步骤都包含:
-- **Parquet 文件**: 高效的数据存储
-- **Stats 文件**: 数据统计信息
-- **时间戳**: 完整的审计跟踪
-
----
-
-## 📈 系统监控
-
-### 日志系统
-```bash
-# 查看实时日志
-tail -f logs/live_trading_YYYYMMDD.log
-
-# 查看数据流日志
-tail -f logs/data_flow_YYYYMMDD.log
-
-# 查看交易日志
-tail -f logs/trade_YYYYMMDD.json
-```
-
-### 性能指标
-- 数据获取延迟
-- 指标计算时间
-- LLM 响应时间
-- 交易执行时间
-
----
-
-## 🧪 测试
-
-```bash
-# 运行单元测试
-python -m pytest tests/
-
-# 测试特定模块
-python -m pytest tests/test_step3_features.py
-```
-
----
-
-## 🛠️ 维护工具
-
-### 文档管理
-```bash
-# 整理文档
-python organize_docs.py
-```
-
-### 项目清理
-```bash
-# 预览清理
-python cleanup_project.py
-
-# 执行清理
-python cleanup_project.py --execute
-```
-
----
-
-## 📝 开发指南
-
-### 添加新策略
-1. 在 `src/strategy/` 创建新策略类
-2. 继承基础策略接口
-3. 实现决策逻辑
-4. 在配置文件中启用
-
-### 添加新指标
-1. 在 `src/features/technical_features.py` 添加指标计算
-2. 更新特征构建器
-3. 在 Step 2 中注册新指标
-
-### 添加新交易对
-1. 在 `config.yaml` 中添加交易对配置
-2. 确认币安支持该交易对
-3. 测试数据获取和交易执行
-
----
-
-## 🤝 贡献
-
-欢迎提交 Issue 和 Pull Request!
-
----
-
-## 📄 许可证
-
-MIT License
-
----
-
-## 📞 支持
-
-- 📚 [完整文档](docs_organized/README.md)
-- 🐛 [问题诊断](docs_organized/12_其他/DIAGNOSIS_SUMMARY.md)
-- 📊 [项目状态](docs_organized/12_其他/PROJECT_STATUS_OVERVIEW.md)
+1. **API 密钥**: 妥善保管,不要提交到版本控制。
+2. **测试模式先行**: 使用 `--test` 参数运行模拟交易，验证逻辑后再上实盘。
+3. **风险控制**: 在 `config.yaml` 中设置合理的全局止损。
+4. **权限最小化**: 为 API 密钥仅分配必要的合约交易权限。
 
 ---
 
 ## 🎉 最新更新
 
-**2024-12-19**:
-- ✅ 完成项目清理,移除 71 个临时文件
-- ✅ 整理 157 个文档到 docs_organized/
-- ✅ 修复 Step2/3 数据归档问题
-- ✅ 验证所有步骤的数据流
-- ✅ 系统已就绪,可用于实盘交易
+**2025-12-20**:
+
+- ✅ **项目重命名**: 正式更名为 `LLM-TradeBot`。
+- ✅ **架构重构**: 迁移到纯 Multi-Agent 架构，放弃 legacy pipeline。
+- ✅ **全链路审计**: 实现从数据采集到决策执行的完整中间态归档。
+- ✅ **统一入口**: 合并所有运行脚本到 `main.py`。
 
 ---
 
-**从零到一,从混沌到秩序,开启智能交易新纪元!** 🚀
+**由 AI 赋能，专注精准决策，开启智能量化新征程!** 🚀

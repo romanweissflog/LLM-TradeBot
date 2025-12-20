@@ -30,13 +30,17 @@ config.yaml
 .env
 
 # 日志
-logs/
+logs/**/*
 *.log
 
 # 数据
-/data/
+data/**/*
+!data/*.md
 *.db
 *.sqlite
+*.csv
+*.json
+*.parquet
 
 # IDE
 .vscode/

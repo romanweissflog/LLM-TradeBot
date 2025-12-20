@@ -110,7 +110,7 @@ def setup_logger():
     )
     
     # 文件输出 - 不使用彩色代码
-    log_file = config.logging.get('file', 'logs/trading.log')
+    log_file = config.logging.get('file', 'logs/multi_agent.log')
     log_path = Path(log_file)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     

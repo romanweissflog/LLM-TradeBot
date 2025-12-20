@@ -11,7 +11,7 @@ from pathlib import Path
 class TradeLogger:
     """交易日志记录器"""
     
-    def __init__(self, log_dir: str = "logs/trades"):
+    def __init__(self, log_dir: str = "data/execution_engine/tracking"):
         """
         初始化交易日志记录器
         

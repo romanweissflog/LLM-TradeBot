@@ -31,6 +31,7 @@ import json
 import time
 
 from src.api.binance_client import BinanceClient
+from src.data.processor import MarketDataProcessor  # ✅ Import Processor
 from src.execution.engine import ExecutionEngine
 from src.risk.manager import RiskManager
 from src.config import Config
@@ -98,6 +99,7 @@ class MultiAgentTradingBot:
         self.risk_manager = RiskManager()
         self.execution_engine = ExecutionEngine(self.client, self.risk_manager)
         self.saver = DataSaver()  # ✅ 初始化数据保存器
+        self.processor = MarketDataProcessor() # ✅ 初始化数据处理器 (for 7-step pipeline support)
         
         # 初始化4大Agent
         print("\n🚀 初始化Agent...")
@@ -140,21 +142,36 @@ class MultiAgentTradingBot:
         print(f"{'='*80}")
         
         try:
-            # Step 1: 异步数据采集
+            # Step 1: 异步数据采集 (Archived by DataSyncAgent or explicitly here)
             print("\n[Step 1/5] 🕵️ DataSyncAgent - 异步数据采集...")
             market_snapshot = await self.data_sync_agent.fetch_all_timeframes(self.symbol)
             
-            # ✅ Save Step 1: Raw Data
+            # ✅ Save Step 1: Raw Data (Already updated before, ensuring it stays)
+            # Note: We can rely on DataSyncAgent but for explicit pipeline control we save here
             self.saver.save_step1_klines(market_snapshot.raw_5m, self.symbol, '5m')
             self.saver.save_step1_klines(market_snapshot.raw_15m, self.symbol, '15m')
             self.saver.save_step1_klines(market_snapshot.raw_1h, self.symbol, '1h')
+            
+            # 🔴 Step 2: Data Processing (Indicator Calculation)
+            # This integrates the "7-Step Pipeline" Step 2 into the Multi-Agent flow
+            print("\n[Step 2/5] ⚙️ MarketDataProcessor - 计算技术指标 (Pipeline Step 2)...")
+            
+            # Process and Archive Step 2 (Indicators)
+            df_5m = self.processor.process_klines(market_snapshot.raw_5m, self.symbol, '5m')
+            df_15m = self.processor.process_klines(market_snapshot.raw_15m, self.symbol, '15m')
+            df_1h = self.processor.process_klines(market_snapshot.raw_1h, self.symbol, '1h')
+            
+            # Update snapshot with processed data (so Agents use standard indicators)
+            market_snapshot.stable_5m = df_5m
+            market_snapshot.stable_15m = df_15m
+            market_snapshot.stable_1h = df_1h
             
             current_price = market_snapshot.live_5m.get('close')
             print(f"  ✅ 当前价格: ${current_price:,.2f}")
             print(f"  ✅ 数据时间: {market_snapshot.timestamp}")
             
-            # Step 2: 量化分析
-            print("\n[Step 2/5] 👨‍🔬 QuantAnalystAgent - 量化分析...")
+            # Step 3 (was 2): 量化分析
+            print("\n[Step 3/5] 👨‍🔬 QuantAnalystAgent - 量化分析...")
             quant_analysis = await self.quant_analyst.analyze_all_timeframes(market_snapshot)
             
             # ✅ Save Step 4: Context (Quant Analysis) as we skip Step 2/3 DFs

@@ -41,7 +41,7 @@ class TrendSubAgent:
         - live_view修正 → ±20分 (实时修正)
         
         Args:
-            snapshot: 市场快照
+            snapshot: 市场快照 (stable_xx DataFrames intended to be populated by MarketDataProcessor)
             
         Returns:
             分析结果字典
@@ -52,13 +52,16 @@ class TrendSubAgent:
         # 1. 1h 主趋势判断 (权重40%)
         stable_1h = snapshot.stable_1h
         if not stable_1h.empty and len(stable_1h) > 50:
-            # 计算EMA
-            ema_12 = EMAIndicator(close=stable_1h['close'], window=12).ema_indicator()
-            ema_26 = EMAIndicator(close=stable_1h['close'], window=26).ema_indicator()
-            
-            # 最后一根已完成K线的EMA
-            last_ema_12 = ema_12.iloc[-1]
-            last_ema_26 = ema_26.iloc[-1]
+            # 优先使用预计算指标
+            if 'ema_12' in stable_1h.columns and 'ema_26' in stable_1h.columns:
+                last_ema_12 = stable_1h['ema_12'].iloc[-1]
+                last_ema_26 = stable_1h['ema_26'].iloc[-1]
+            else:
+                # 兼容模式：现场计算
+                ema_12 = EMAIndicator(close=stable_1h['close'], window=12).ema_indicator()
+                ema_26 = EMAIndicator(close=stable_1h['close'], window=26).ema_indicator()
+                last_ema_12 = ema_12.iloc[-1]
+                last_ema_26 = ema_26.iloc[-1]
             
             if last_ema_12 > last_ema_26:
                 trend_1h_score = 40
@@ -99,28 +102,30 @@ class TrendSubAgent:
         # 3. 15m 中期确认 (权重30%)
         stable_15m = snapshot.stable_15m
         if not stable_15m.empty and len(stable_15m) > 30:
-            # 计算MACD
-            macd_ind = MACD(close=stable_15m['close'])
-            macd_diff = macd_ind.macd_diff()
-            
-            # 检查MACD柱状图是否扩大
-            if len(macd_diff) >= 2:
+            # 优先使用预计算指标
+            if 'macd_diff' in stable_15m.columns:
+                current_macd = stable_15m['macd_diff'].iloc[-1]
+                prev_macd = stable_15m['macd_diff'].iloc[-2]
+            else:
+                macd_ind = MACD(close=stable_15m['close'])
+                macd_diff = macd_ind.macd_diff()
                 current_macd = macd_diff.iloc[-1]
                 prev_macd = macd_diff.iloc[-2]
-                
-                if current_macd > prev_macd > 0:
-                    trend_15m_score = 30  # MACD金叉且扩大
-                    trend_15m_status = "上涨加速"
-                elif current_macd < prev_macd < 0:
-                    trend_15m_score = -30  # MACD死叉且扩大
-                    trend_15m_status = "下跌加速"
-                else:
-                    trend_15m_score = 0
-                    trend_15m_status = "震荡"
-                
-                score += trend_15m_score
-                details['15m_trend'] = trend_15m_status
-                details['15m_macd_diff'] = float(current_macd)
+            
+            # 检查MACD柱状图是否扩大
+            if current_macd > prev_macd > 0:
+                trend_15m_score = 30  # MACD金叉且扩大
+                trend_15m_status = "上涨加速"
+            elif current_macd < prev_macd < 0:
+                trend_15m_score = -30  # MACD死叉且扩大
+                trend_15m_status = "下跌加速"
+            else:
+                trend_15m_score = 0
+                trend_15m_status = "震荡"
+            
+            score += trend_15m_score
+            details['15m_trend'] = trend_15m_status
+            details['15m_macd_diff'] = float(current_macd)
         
         # 限制得分范围
         score = max(-100, min(100, score))
@@ -206,20 +211,21 @@ class OscillatorSubAgent:
         # 2. 1h RSI确认
         stable_1h = snapshot.stable_1h
         if not stable_1h.empty:
-            rsi_1h = RSIIndicator(close=stable_1h['close'], window=14).rsi()
+            if 'rsi' in stable_1h.columns:
+                last_rsi_1h = stable_1h['rsi'].iloc[-1]
+            else:
+                rsi_1h = RSIIndicator(close=stable_1h['close'], window=14).rsi()
+                last_rsi_1h = rsi_1h.iloc[-1] if len(rsi_1h) > 0 else 50
             
-            if len(rsi_1h) > 0:
-                last_rsi_1h = rsi_1h.iloc[-1]
-                
-                # 1h超买超卖的权重更高
-                if last_rsi_1h > 80:
-                    score -= 20  # 额外扣分
-                    details['1h_warning'] = "1h级别超买"
-                elif last_rsi_1h < 20:
-                    score += 20  # 额外加分
-                    details['1h_warning'] = "1h级别超卖"
-                
-                details['1h_rsi'] = float(last_rsi_1h)
+            # 1h超买超卖的权重更高
+            if last_rsi_1h > 80:
+                score -= 20  # 额外扣分
+                details['1h_warning'] = "1h级别超买"
+            elif last_rsi_1h < 20:
+                score += 20  # 额外加分
+                details['1h_warning'] = "1h级别超卖"
+            
+            details['1h_rsi'] = float(last_rsi_1h)
         
         # 限制得分范围
         score = max(-100, min(100, score))

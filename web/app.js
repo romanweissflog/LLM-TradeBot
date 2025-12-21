@@ -509,7 +509,7 @@ function renderLogs(logs) {
         content = content.replace(/Command: ([A-Z]+)/g, 'Command: <span style="color: #74b9ff; font-weight: bold;">$1</span>');
 
         // 4. Cycle Info (Highlight Cycle #X)
-        content = content.replace(/Cycle #(\d+)/g, '<span style="color: #fdcb6e; font-weight: bold;">Cycle #$1</span>');
+        content = content.replace(/Cycle #(\d+)/g, '<span style="color: #74b9ff; font-weight: bold;">Cycle #$1</span>');
 
         return `<div class="log-entry">${time} ${content}</div>`;
     }).join('');

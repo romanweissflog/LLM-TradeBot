@@ -16,7 +16,7 @@ Intelligent Multi-Agent Quantitative Trading Bot based on the **Adversarial Deci
 ## ✨ Key Features
 
 - 🕵️ **Perception First**: Unlike strict indicator-based systems, this framework prioritizes judging "IF we should trade" before deciding "HOW to trade".
-- 🤖 **Multi-Agent Collaboration**: 4 highly specialized Agents operating independently to form an adversarial verification chain.
+- 🤖 **Multi-Agent Collaboration**: 8 highly specialized Agents operating independently to form an adversarial verification chain.
 - ⚡ **Async Concurrency**: Currently fetches multi-timeframe data (5m/15m/1h) concurrently, ensuring data alignment at the snapshot moment.
 - 🛡️ **Safety First**: Stop-loss direction correction, capital pre-rehearsal, and veto mechanisms to safeguard live trading.
 - 📊 **Full-Link Auditing**: Every decision's adversarial process and confidence penalty details are recorded, achieving true "White-Box" decision-making.
@@ -187,19 +187,36 @@ LLM-TradeBot/
         - Supports auto-retraining (every 2h) to adapt to changing market conditions.
     - **Output**: Probability of price increase (P_Up) and confidence score.
 
-4. **⚖️ DecisionCoreAgent (The Critic)**
+4. **🐂 Bull Agent (The Optimist)**
+    - **Role**: Bullish Market Advocate.
+    - **Action**: Analyzes the same market data but focuses **exclusively on bullish signals**.
+    - **Output**:
+        - `stance`: `STRONGLY_BULLISH` / `SLIGHTLY_BULLISH` / `NEUTRAL` / `UNCERTAIN`
+        - `bullish_reasons`: Key observations supporting a long position
+        - `bull_confidence`: 0-100% confidence in the bullish case
+
+5. **🐻 Bear Agent (The Pessimist)**
+    - **Role**: Bearish Market Advocate.
+    - **Action**: Analyzes the same market data but focuses **exclusively on bearish signals**.
+    - **Output**:
+        - `stance`: `STRONGLY_BEARISH` / `SLIGHTLY_BEARISH` / `NEUTRAL` / `UNCERTAIN`
+        - `bearish_reasons`: Key observations supporting a short position
+        - `bear_confidence`: 0-100% confidence in the bearish case
+
+6. **⚖️ DecisionCoreAgent (The Critic)**
     - **Role**: **Adversarial Judge**.
     - **Action**:
         - **Contextualization**: Uses `RegimeDetector` to identify market state (Trending/Choppy) and `PositionAnalyzer` to locate price relative to history.
-        - **Integration**: Combines Strategist's technical signals with Prophet's ML predictions.
+        - **Adversarial Input**: Receives **both Bull and Bear perspectives** to make balanced decisions.
+        - **Integration**: Combines Strategist's technical signals with Prophet's ML predictions and Bull/Bear viewpoints.
         - **Weighted Voting**: Re-evaluates granular signals with dynamic weights adapted to the current regime.
         - **Output**: The final trading intent (Long/Short/Wait) with a confidence score.
 
-5. **🛡️ RiskAuditAgent (The Guardian)**
+7. **🛡️ RiskAuditAgent (The Guardian)**
     - **Role**: Risk Controller.
     - **Action**: Physically independent audit layer. Checks Max Drawdown protection, R/R requirements, and exposure limits. Has **Veto Power** to block high-risk trades regardless of high confidence.
 
-6. **🚀 ExecutionEngine**
+8. **🚀 ExecutionEngine**
     - **Role**: Sniper.
     - **Action**: Precision execution within the closing seconds of the candle, handling order lifecycle and state updates.
 
@@ -216,10 +233,11 @@ LLM-TradeBot/
 1. **Data Collection Layer** (Blue): DataSyncAgent async concurrent collection
 2. **Quant Analysis Layer** (Green): QuantAnalystAgent with 3 parallel Sub-Agents
 3. **Prediction Layer** (Magenta): PredictAgent with LightGBM ML model
-4. **Decision Adversarial Layer** (Orange): DecisionCoreAgent with regime-aware weighted voting
-5. **Risk Audit Layer** (Red): RiskAuditAgent final check and auto-correction
-6. **Execution Layer** (Purple): ExecutionEngine order execution
-7. **Visualization Layer**: Recent Decisions table showing full Agent data (16 columns)
+4. **Bull/Bear Adversarial Layer** (Yellow): 🐂 Bull Agent + 🐻 Bear Agent provide opposing perspectives
+5. **Decision Adversarial Layer** (Orange): DecisionCoreAgent with regime-aware weighted voting + Bull/Bear input
+6. **Risk Audit Layer** (Red): RiskAuditAgent final check and auto-correction
+7. **Execution Layer** (Purple): ExecutionEngine order execution
+8. **Visualization Layer**: Recent Decisions table showing full Agent data (18 columns including Bull/Bear)
 
 #### Detailed Flowchart
 
@@ -242,26 +260,35 @@ graph TB
         PA --> ML[LightGBM Model<br/>Auto-Train 2h]
         ML --> PR[Prediction<br/>P_Up, Conf]
     end
+
+    subgraph "4️⃣ Bull/Bear Adversarial Layer"
+        MS --> BULL[🐂 Bull Agent<br/>Optimist]
+        MS --> BEAR[🐻 Bear Agent<br/>Pessimist]
+        BULL --> BP[Bull Perspective<br/>Stance, Reasons]
+        BEAR --> BRP[Bear Perspective<br/>Stance, Reasons]
+    end
     
-    subgraph "4️⃣ Decision Adversarial Layer"
-        QR & PR --> DC[⚖️ DecisionCoreAgent<br/>Weighted Voting]
+    subgraph "5️⃣ Decision Adversarial Layer"
+        QR & PR & BP & BRP --> DC[⚖️ DecisionCoreAgent<br/>Weighted Voting]
         DC --> RD[RegimeDetector]
         DC --> POS[PositionAnalyzer]
         RD & POS --> VR[VoteResult<br/>Action, Conf]
     end
     
-    subgraph "5️⃣ Risk Audit Layer"
+    subgraph "6️⃣ Risk Audit Layer"
         VR --> RA[🛡️ RiskAuditAgent<br/>Veto Power]
         RA --> AR[AuditResult<br/>Risk, Guard]
     end
     
-    subgraph "6️⃣ Execution Layer"
+    subgraph "7️⃣ Execution Layer"
         AR --> EE[🚀 ExecutionEngine]
     end
     
     style A fill:#4A90E2,color:#fff
     style QA fill:#7ED321,color:#fff
     style PA fill:#BD10E0,color:#fff
+    style BULL fill:#F8E71C,color:#333
+    style BEAR fill:#F8E71C,color:#333
     style DC fill:#F5A623,color:#fff
     style RA fill:#D0021B,color:#fff
     style EE fill:#9013FE,color:#fff

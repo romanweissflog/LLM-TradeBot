@@ -48,11 +48,17 @@ class StrategyEngine:
             决策结果字典
         """
         
+        # 🐂🐻 Get adversarial perspectives first
+        log.info("🐂🐻 Gathering Bull/Bear perspectives...")
+        bull_perspective = self.get_bull_perspective(market_context_text)
+        bear_perspective = self.get_bear_perspective(market_context_text)
+        
         system_prompt = self._build_system_prompt()
-        user_prompt = self._build_user_prompt(market_context_text)
+        user_prompt = self._build_user_prompt(market_context_text, bull_perspective, bear_perspective)
         
         # 记录 LLM 输入
         log.llm_input("正在发送市场数据到 DeepSeek...", market_context_text)
+
         
         try:
             response = self.client.chat.completions.create(
@@ -108,12 +114,133 @@ class StrategyEngine:
             decision['system_prompt'] = system_prompt
             decision['user_prompt'] = user_prompt
             
+            # 🐂🐻 Add Bull/Bear perspectives for dashboard
+            decision['bull_perspective'] = bull_perspective
+            decision['bear_perspective'] = bear_perspective
+            
             return decision
             
         except Exception as e:
             log.error(f"LLM决策失败: {e}")
             # 返回保守决策
             return self._get_fallback_decision(market_context_data)
+    
+    def get_bull_perspective(self, market_context_text: str) -> Dict:
+        """
+        🐂 Bull Agent: Analyze market from bullish perspective
+        
+        Args:
+            market_context_text: Formatted market context
+            
+        Returns:
+            Dict with bullish_reasons and bull_confidence
+        """
+        bull_prompt = """You are a BULLISH market analyst. Your job is to find reasons WHY the market could go UP.
+
+Analyze the provided market data and identify:
+1. Bullish technical signals (support levels, RSI oversold, MACD crossovers)
+2. Positive trend indicators
+3. Entry opportunities for LONG positions
+
+Output your analysis in this EXACT JSON format:
+```json
+{
+  "stance": "STRONGLY_BULLISH",
+  "bullish_reasons": "Your 3-5 key bullish observations, separated by semicolons",
+  "bull_confidence": 75
+}
+```
+
+stance must be one of: STRONGLY_BULLISH, SLIGHTLY_BULLISH, NEUTRAL, UNCERTAIN
+bull_confidence should be 0-100 based on how strong the bullish case is.
+Focus ONLY on bullish factors. Ignore bearish signals."""
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": bull_prompt},
+                    {"role": "user", "content": market_context_text}
+                ],
+                temperature=0.3,
+                max_tokens=500
+            )
+            
+            content = response.choices[0].message.content
+            
+            # Parse JSON from response
+            import re
+            json_match = re.search(r'\{[^}]+\}', content, re.DOTALL)
+            if json_match:
+                result = json.loads(json_match.group())
+                stance = result.get('stance', 'UNKNOWN')
+                log.info(f"🐂 Bull Agent: [{stance}] {result.get('bullish_reasons', '')[:40]}... (Conf: {result.get('bull_confidence', 0)}%)")
+                return result
+            
+            return {"bullish_reasons": "Unable to analyze", "bull_confidence": 50}
+            
+        except Exception as e:
+            log.warning(f"Bull Agent failed: {e}")
+            return {"bullish_reasons": "Analysis unavailable", "bull_confidence": 50}
+    
+    def get_bear_perspective(self, market_context_text: str) -> Dict:
+        """
+        🐻 Bear Agent: Analyze market from bearish perspective
+        
+        Args:
+            market_context_text: Formatted market context
+            
+        Returns:
+            Dict with bearish_reasons and bear_confidence
+        """
+        bear_prompt = """You are a BEARISH market analyst. Your job is to find reasons WHY the market could go DOWN.
+
+Analyze the provided market data and identify:
+1. Bearish technical signals (resistance levels, RSI overbought, bearish divergence)
+2. Negative trend indicators
+3. Entry opportunities for SHORT positions or exit warnings for LONG
+
+Output your analysis in this EXACT JSON format:
+```json
+{
+  "stance": "STRONGLY_BEARISH",
+  "bearish_reasons": "Your 3-5 key bearish observations, separated by semicolons",
+  "bear_confidence": 60
+}
+```
+
+stance must be one of: STRONGLY_BEARISH, SLIGHTLY_BEARISH, NEUTRAL, UNCERTAIN
+bear_confidence should be 0-100 based on how strong the bearish case is.
+Focus ONLY on bearish factors. Ignore bullish signals."""
+
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": bear_prompt},
+                    {"role": "user", "content": market_context_text}
+                ],
+                temperature=0.3,
+                max_tokens=500
+            )
+            
+            content = response.choices[0].message.content
+            
+            # Parse JSON from response
+            import re
+            json_match = re.search(r'\{[^}]+\}', content, re.DOTALL)
+            if json_match:
+                result = json.loads(json_match.group())
+                stance = result.get('stance', 'UNKNOWN')
+                log.info(f"🐻 Bear Agent: [{stance}] {result.get('bearish_reasons', '')[:40]}... (Conf: {result.get('bear_confidence', 0)}%)")
+                return result
+            
+            return {"bearish_reasons": "Unable to analyze", "bear_confidence": 50}
+            
+        except Exception as e:
+            log.warning(f"Bear Agent failed: {e}")
+            return {"bearish_reasons": "Analysis unavailable", "bear_confidence": 50}
     
     def _build_system_prompt(self) -> str:
         """Build System Prompt (English Version)"""
@@ -463,15 +590,38 @@ RR ratio: (3400-3200)/(3500-3400) = 2.0
 Now, please output your analysis and decision strictly following the format above. JSON must be an array format `[{...}]`.
 """
     
-    def _build_user_prompt(self, market_context: str) -> str:
-        """Build User Prompt (English Version)"""
+    def _build_user_prompt(self, market_context: str, bull_perspective: Dict = None, bear_perspective: Dict = None) -> str:
+        """Build User Prompt (English Version) with Bull/Bear perspectives"""
+        
+        # Build adversarial analysis section
+        adversarial_section = ""
+        if bull_perspective or bear_perspective:
+            bull_reasons = bull_perspective.get('bullish_reasons', 'N/A') if bull_perspective else 'N/A'
+            bull_conf = bull_perspective.get('bull_confidence', 50) if bull_perspective else 50
+            bear_reasons = bear_perspective.get('bearish_reasons', 'N/A') if bear_perspective else 'N/A'
+            bear_conf = bear_perspective.get('bear_confidence', 50) if bear_perspective else 50
+            
+            adversarial_section = f"""
+
+## 🐂🐻 Adversarial Analysis (Consider BOTH perspectives)
+
+### 🐂 Bull Agent (Confidence: {bull_conf}%)
+{bull_reasons}
+
+### 🐻 Bear Agent (Confidence: {bear_conf}%)
+{bear_reasons}
+
+> **IMPORTANT**: Weigh both perspectives. If one side has significantly higher confidence (>20% difference), lean towards that direction. If similar, prefer `wait`.
+
+---
+"""
         
         return f"""# 📊 Real-Time Market Data (Technical Analysis Completed)
 
 The system has prepared the following complete market status for **5m/15m/1h** timeframes:
 
 {market_context}
-
+{adversarial_section}
 ---
 
 ## 🎯 Your Task

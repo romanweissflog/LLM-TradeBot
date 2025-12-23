@@ -372,6 +372,40 @@ function renderDecisionTable(history, positions = []) {
             prophetHtml = `<span class="val ${cls}">${pUp}%</span>`;
         }
 
+        // 🐂🐻 Bull/Bear Agent Confidence with Semantic Stance
+        let bullHtml = '<span class="cell-na">-</span>';
+        let bearHtml = '<span class="cell-na">-</span>';
+        if (d.vote_details) {
+            const bullConf = d.vote_details.bull_confidence;
+            const bearConf = d.vote_details.bear_confidence;
+            const bullStance = d.vote_details.bull_stance || 'UNKNOWN';
+            const bearStance = d.vote_details.bear_stance || 'UNKNOWN';
+            const bullReasons = d.vote_details.bull_reasons || '';
+            const bearReasons = d.vote_details.bear_reasons || '';
+
+            // Stance abbreviations
+            const stanceAbbr = {
+                'STRONGLY_BULLISH': '🔥强多',
+                'SLIGHTLY_BULLISH': '↗轻多',
+                'STRONGLY_BEARISH': '🔥强空',
+                'SLIGHTLY_BEARISH': '↘轻空',
+                'NEUTRAL': '➖中性',
+                'UNCERTAIN': '❓不定',
+                'UNKNOWN': '?'
+            };
+
+            if (bullConf !== undefined) {
+                const bullCls = bullConf > 60 ? 'pos' : (bullConf < 40 ? 'neg' : 'neutral');
+                const bullAbbr = stanceAbbr[bullStance] || bullStance;
+                bullHtml = `<span class="val ${bullCls}" title="${bullReasons}" style="font-size:0.8em">${bullAbbr}<br/>${bullConf}%</span>`;
+            }
+            if (bearConf !== undefined) {
+                const bearCls = bearConf > 60 ? 'neg' : (bearConf < 40 ? 'pos' : 'neutral');
+                const bearAbbr = stanceAbbr[bearStance] || bearStance;
+                bearHtml = `<span class="val ${bearCls}" title="${bearReasons}" style="font-size:0.8em">${bearAbbr}<br/>${bearConf}%</span>`;
+            }
+        }
+
         return `
             <tr>
                 <td>${time}</td>
@@ -388,6 +422,8 @@ function renderDecisionTable(history, positions = []) {
                 <td>${regHtml}</td>
                 <td>${posHtml}</td>
                 <td>${prophetHtml}</td>
+                <td>${bullHtml}</td>
+                <td>${bearHtml}</td>
                 <td>${riskHtml}</td>
                 <td>${guardHtml}</td>
                 <td>${alignedHtml}</td>

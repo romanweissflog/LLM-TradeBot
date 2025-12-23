@@ -402,7 +402,14 @@ class MultiAgentTradingBot:
                 # Sentiment
                 'sentiment': q_sent.get('total_sentiment_score', 0),
                 # Prophet
-                'prophet': predict_result.probability_up
+                'prophet': predict_result.probability_up,
+                # 🐂🐻 Bull/Bear Agent Perspectives
+                'bull_confidence': llm_decision.get('bull_perspective', {}).get('bull_confidence', 50),
+                'bear_confidence': llm_decision.get('bear_perspective', {}).get('bear_confidence', 50),
+                'bull_stance': llm_decision.get('bull_perspective', {}).get('stance', 'UNKNOWN'),
+                'bear_stance': llm_decision.get('bear_perspective', {}).get('stance', 'UNKNOWN'),
+                'bull_reasons': llm_decision.get('bull_perspective', {}).get('bullish_reasons', ''),
+                'bear_reasons': llm_decision.get('bear_perspective', {}).get('bearish_reasons', '')
             }
             
             # Determine Regime from Trend Score using Semantic Converter
@@ -468,6 +475,16 @@ class MultiAgentTradingBot:
             
             # LOG: DeepSeek
             global_state.add_log(f"🧠 DeepSeek LLM: Action={vote_result.action.upper()} | Conf={llm_decision.get('confidence', 0)}% | {llm_decision.get('reasoning', '')[:50]}")
+            
+            # LOG: Bull/Bear Agents
+            bull_conf = llm_decision.get('bull_perspective', {}).get('bull_confidence', 50)
+            bear_conf = llm_decision.get('bear_perspective', {}).get('bear_confidence', 50)
+            bull_stance = llm_decision.get('bull_perspective', {}).get('stance', 'UNKNOWN')
+            bear_stance = llm_decision.get('bear_perspective', {}).get('stance', 'UNKNOWN')
+            bull_reasons = llm_decision.get('bull_perspective', {}).get('bullish_reasons', '')[:50]
+            bear_reasons = llm_decision.get('bear_perspective', {}).get('bearish_reasons', '')[:50]
+            global_state.add_log(f"🐂 Bull Agent: [{bull_stance}] Conf={bull_conf}% | {bull_reasons}...")
+            global_state.add_log(f"🐻 Bear Agent: [{bear_stance}] Conf={bear_conf}% | {bear_reasons}...")
             
             # ✅ Decision Recording moved after Risk Audit for complete context
             # Saved to file still happens here for "raw" decision

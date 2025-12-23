@@ -2,6 +2,7 @@
 外部量化输出 API 接入层
 支持: Netflow (机构/个人), OI (Binance/ByBit), Price Change
 """
+import os
 import aiohttp
 import asyncio
 from typing import Dict, Optional
@@ -11,11 +12,14 @@ class QuantClient:
     """外部量化 API 客户端"""
     
     BASE_URL = "http://nofxaios.com:30006/api/coin"
-    AUTH_TOKEN = "cm_568c67eae410d912c54c"
+    # Security fix: Load AUTH_TOKEN from environment variable
+    AUTH_TOKEN = os.getenv('QUANT_AUTH_TOKEN', '')
     
     def __init__(self, timeout: int = 10):
         self.timeout = aiohttp.ClientTimeout(total=timeout)
         self.session: Optional[aiohttp.ClientSession] = None
+        if not self.AUTH_TOKEN:
+            log.warning("QUANT_AUTH_TOKEN not set in environment, quant API calls may fail")
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """获取或创建 aiohttp session，正确处理 event loop 变化"""

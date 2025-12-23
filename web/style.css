@@ -428,6 +428,11 @@ th {
     color: #e84393;
 }
 
+.group-bullbear {
+    background: rgba(253, 203, 110, 0.15);
+    color: #fdcb6e;
+}
+
 .group-guardian {
     background: rgba(255, 118, 117, 0.15);
     color: #ff7675;

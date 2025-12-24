@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 import pandas as pd
 import numpy as np
+from src.utils.json_utils import safe_json_dump
 
 
 class TradingPipelineLogger:
@@ -443,7 +444,7 @@ class TradingPipelineLogger:
         cycle_file = self.log_dir / f"cycle_{self.session_id}_{cycle_data['cycle_id']:03d}.json"
         
         with open(cycle_file, 'w', encoding='utf-8') as f:
-            json.dump(cycle_data, f, indent=2, ensure_ascii=False)
+            safe_json_dump(cycle_data, f, indent=2, ensure_ascii=False)
         
         print(f"💾 周期日志已保存: {cycle_file}")
     
@@ -461,7 +462,7 @@ class TradingPipelineLogger:
         summary_file = self.log_dir / f"session_{self.session_id}_summary.json"
         
         with open(summary_file, 'w', encoding='utf-8') as f:
-            json.dump(summary, f, indent=2, ensure_ascii=False)
+            safe_json_dump(summary, f, indent=2, ensure_ascii=False)
         
         print(f"\n{'='*100}")
         print(f"💾 会话总结已保存: {summary_file}")

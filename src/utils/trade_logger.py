@@ -6,6 +6,7 @@ import os
 from datetime import datetime
 from typing import Dict, Optional
 from pathlib import Path
+from src.utils.json_utils import safe_json_dump, safe_json_dumps
 
 
 class TradeLogger:
@@ -112,12 +113,12 @@ class TradeLogger:
         # 保存到单独的持仓文件
         position_file = self.log_dir / "positions" / f"{trade_id}.json"
         with open(position_file, 'w', encoding='utf-8') as f:
-            json.dump(trade_record, f, indent=2, ensure_ascii=False)
+            safe_json_dump(trade_record, f, indent=2, ensure_ascii=False)
         
         # 追加到当日交易日志
         daily_file = self.log_dir / "daily" / f"trades_{timestamp.strftime('%Y%m%d')}.jsonl"
         with open(daily_file, 'a', encoding='utf-8') as f:
-            f.write(json.dumps(trade_record, ensure_ascii=False) + '\n')
+            f.write(safe_json_dumps(trade_record, ensure_ascii=False) + '\n')
         
         print(f"✅ 交易日志已保存: {position_file}")
         
@@ -174,12 +175,12 @@ class TradeLogger:
         
         # 更新持仓文件
         with open(position_file, 'w', encoding='utf-8') as f:
-            json.dump(trade_record, f, indent=2, ensure_ascii=False)
+            safe_json_dump(trade_record, f, indent=2, ensure_ascii=False)
         
         # 追加到当日交易日志
         daily_file = self.log_dir / "daily" / f"trades_{timestamp.strftime('%Y%m%d')}.jsonl"
         with open(daily_file, 'a', encoding='utf-8') as f:
-            f.write(json.dumps(trade_record, ensure_ascii=False) + '\n')
+            f.write(safe_json_dumps(trade_record, ensure_ascii=False) + '\n')
         
         # 更新交易汇总
         self._update_summary(trade_record)
@@ -292,7 +293,7 @@ class TradeLogger:
         
         # 保存更新后的汇总
         with open(summary_file, 'w', encoding='utf-8') as f:
-            json.dump(summary, f, indent=2, ensure_ascii=False)
+            safe_json_dump(summary, f, indent=2, ensure_ascii=False)
     
     def get_open_positions(self) -> list:
         """获取所有未平仓的持仓"""

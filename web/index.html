@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LLM-TradeBot Dashboard</title>
-    <link rel="stylesheet" href="/static/style.css?v=35">
+    <link rel="stylesheet" href="/static/style.css?v=42">
     <link
         href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600&display=swap"
         rel="stylesheet">
@@ -18,16 +18,40 @@
         <header class="glass-panel header">
             <div class="logo">
                 <span class="icon">🤖</span>
-                <h1>LLM-TradeBot: Adversarial Decision Framework <a href="https://github.com/EthanAlgoX/LLM-TradeBot"
-                        target="_blank"
-                        style="color: var(--neon-blue); text-decoration: none; font-size: 0.65em;">https://github.com/EthanAlgoX/LLM-TradeBot</a>
-                </h1>
+                <div class="logo-text">
+                    <h1>LLM-TradeBot</h1>
+                    <span class="tagline">Adversarial Decision Framework</span>
+                </div>
+                <div class="social-links">
+                    <a href="https://github.com/EthanAlgoX/LLM-TradeBot" target="_blank" title="GitHub"
+                        class="social-link github">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                            <path
+                                d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+                        </svg>
+                    </a>
+                    <a href="https://x.com/EthanAlgoX" target="_blank" title="Twitter / X" class="social-link twitter">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                            <path
+                                d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+                        </svg>
+                    </a>
+                </div>
             </div>
             <div class="status-indicators">
                 <div class="controls">
-                    <button id="btn-start" class="btn-control start" title="Start Trading">▶</button>
-                    <button id="btn-pause" class="btn-control pause" title="Pause Trading">⏸</button>
-                    <button id="btn-stop" class="btn-control stop" title="Stop System">⏹</button>
+                    <!-- Settings Button - Elegant Text Style -->
+                    <button id="btn-settings" class="btn-settings-elegant" title="Settings">
+                        <span class="settings-icon">⚙️</span>
+                        <span class="settings-text">Settings</span>
+                    </button>
+
+                    <button id="btn-start" class="btn-control start" title="Start Trading"
+                        onclick="if(window.setControl) window.setControl('start');">▶</button>
+                    <button id="btn-pause" class="btn-control pause" title="Pause Trading"
+                        onclick="if(window.setControl) window.setControl('pause');">⏸</button>
+                    <button id="btn-stop" class="btn-control stop" title="Stop System"
+                        onclick="if(window.setControl) window.setControl('stop');">⏹</button>
 
                     <select id="interval-selector" class="interval-selector" title="Cycle Interval">
                         <option value="0.5">30s</option>
@@ -120,15 +144,15 @@
                         <h2>📈 Net Value Curve</h2>
                         <div class="header-metrics">
                             <div class="h-metric">
-                                <span class="label">Total Equity</span>
+                                <span class="label">Initial Balance</span>
+                                <span id="acc-initial" class="val">$0.00</span>
+                            </div>
+                            <div class="h-metric">
+                                <span class="label">Current Funds</span>
                                 <span id="acc-equity" class="val">$0.00</span>
                             </div>
                             <div class="h-metric">
-                                <span class="label">Wallet</span>
-                                <span id="acc-wallet" class="val">$0.00</span>
-                            </div>
-                            <div class="h-metric">
-                                <span class="label">PnL</span>
+                                <span class="label">Total Profit</span>
                                 <span id="acc-pnl" class="val neutral">$0.00</span>
                             </div>
                         </div>
@@ -316,7 +340,473 @@
         </main>
         </main>
     </div>
-    <script src="/static/app.js?v=20251224g"></script>
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content settings-modal">
+            <div class="modal-header">
+                <h3>⚙️ Settings</h3>
+                <button id="close-settings" class="btn-close">×</button>
+            </div>
+
+            <div class="settings-tabs">
+                <button class="tab-btn active" data-tab="tab-keys">API Keys</button>
+                <button class="tab-btn" data-tab="tab-accounts">Accounts</button>
+                <button class="tab-btn" data-tab="tab-trading">Trading</button>
+                <button class="tab-btn" data-tab="tab-prompt">Strategy</button>
+            </div>
+
+            <div class="settings-body">
+                <!-- Tab: API Keys -->
+                <div id="tab-keys" class="tab-pane active">
+                    <div class="form-group">
+                        <label>Trading Mode</label>
+                        <select id="cfg-run-mode" class="form-control" style="border-color: #ecc94b;">
+                            <option value="test">Test Mode (Paper Trading)</option>
+                            <option value="live">Live Trading (Real Money)</option>
+                        </select>
+                        <p style="color: #a0aec0; font-size: 0.8em; margin-top: 4px;">Requires restart to apply change.
+                        </p>
+                    </div>
+
+                    <div id="binance-config-section">
+                        <div class="form-group">
+                            <label>Binance API Key</label>
+                            <input type="password" id="cfg-binance-key" class="form-control"
+                                placeholder="Saved (Hidden)">
+                        </div>
+                        <div class="form-group">
+                            <label>Binance Secret Key</label>
+                            <input type="password" id="cfg-binance-secret" class="form-control"
+                                placeholder="Saved (Hidden)">
+                        </div>
+                        <hr style="border-color: rgba(255,255,255,0.1); margin: 20px 0;">
+                    </div>
+
+                    <!-- LLM Provider Selection -->
+                    <div class="form-group">
+                        <label>🤖 LLM Provider</label>
+                        <select id="cfg-llm-provider" class="form-control" style="border-color: #00ff9d;">
+                            <option value="deepseek">DeepSeek (Default)</option>
+                            <option value="openai">OpenAI</option>
+                            <option value="claude">Claude (Anthropic)</option>
+                            <option value="qwen">Qwen (通义千问)</option>
+                            <option value="gemini">Gemini (Google)</option>
+                        </select>
+                        <p style="color: #a0aec0; font-size: 0.75em; margin-top: 4px;">Requires restart to apply.</p>
+                    </div>
+
+                    <!-- DeepSeek API Key -->
+                    <div class="form-group llm-key-field" data-provider="deepseek">
+                        <label>DeepSeek API Key</label>
+                        <input type="password" id="cfg-deepseek-key" class="form-control" placeholder="Saved (Hidden)">
+                        <p style="color: #718096; font-size: 0.7em; margin-top: 2px;">Get key: <a
+                                href="https://platform.deepseek.com" target="_blank"
+                                style="color: #00ff9d">platform.deepseek.com</a></p>
+                    </div>
+
+                    <!-- OpenAI API Key -->
+                    <div class="form-group llm-key-field" data-provider="openai" style="display:none;">
+                        <label>OpenAI API Key</label>
+                        <input type="password" id="cfg-openai-key" class="form-control" placeholder="sk-...">
+                        <p style="color: #718096; font-size: 0.7em; margin-top: 2px;">Get key: <a
+                                href="https://platform.openai.com" target="_blank"
+                                style="color: #00ff9d">platform.openai.com</a></p>
+                    </div>
+
+                    <!-- Claude API Key -->
+                    <div class="form-group llm-key-field" data-provider="claude" style="display:none;">
+                        <label>Claude API Key</label>
+                        <input type="password" id="cfg-claude-key" class="form-control" placeholder="sk-ant-...">
+                        <p style="color: #718096; font-size: 0.7em; margin-top: 2px;">Get key: <a
+                                href="https://console.anthropic.com" target="_blank"
+                                style="color: #00ff9d">console.anthropic.com</a></p>
+                    </div>
+
+                    <!-- Qwen API Key -->
+                    <div class="form-group llm-key-field" data-provider="qwen" style="display:none;">
+                        <label>Qwen API Key</label>
+                        <input type="password" id="cfg-qwen-key" class="form-control" placeholder="Saved (Hidden)">
+                        <p style="color: #718096; font-size: 0.7em; margin-top: 2px;">Get key: <a
+                                href="https://dashscope.console.aliyun.com" target="_blank"
+                                style="color: #00ff9d">dashscope.console.aliyun.com</a></p>
+                    </div>
+
+                    <!-- Gemini API Key -->
+                    <div class="form-group llm-key-field" data-provider="gemini" style="display:none;">
+                        <label>Gemini API Key</label>
+                        <input type="password" id="cfg-gemini-key" class="form-control" placeholder="Saved (Hidden)">
+                        <p style="color: #718096; font-size: 0.7em; margin-top: 2px;">Get key: <a
+                                href="https://aistudio.google.com" target="_blank"
+                                style="color: #00ff9d">aistudio.google.com</a></p>
+                    </div>
+                </div>
+
+                <!-- Tab: Trading -->
+                <div id="tab-trading" class="tab-pane">
+
+                    <div class="form-group">
+                        <label>Trading Symbols</label>
+                        <div id="cfg-symbol-container"
+                            style="background: rgba(0,0,0,0.2); padding: 10px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.1);">
+                            <div style="margin-bottom: 5px;">
+                                <label
+                                    style="display:inline-flex; align-items:center; margin-right:15px; cursor:pointer;">
+                                    <input type="checkbox" name="cfg-symbol" value="BTCUSDT"> <span
+                                        style="margin-left:5px">BTC/USDT</span>
+                                </label>
+                                <label
+                                    style="display:inline-flex; align-items:center; margin-right:15px; cursor:pointer;">
+                                    <input type="checkbox" name="cfg-symbol" value="ETHUSDT"> <span
+                                        style="margin-left:5px">ETH/USDT</span>
+                                </label>
+                            </div>
+                            <div>
+                                <label
+                                    style="display:inline-flex; align-items:center; margin-right:15px; cursor:pointer;">
+                                    <input type="checkbox" name="cfg-symbol" value="SOLUSDT"> <span
+                                        style="margin-left:5px">SOL/USDT</span>
+                                </label>
+                                <label
+                                    style="display:inline-flex; align-items:center; margin-right:15px; cursor:pointer;">
+                                    <input type="checkbox" name="cfg-symbol" value="BNBUSDT"> <span
+                                        style="margin-left:5px">BNB/USDT</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Leverage</label>
+                        <input type="number" id="cfg-leverage" class="form-control" min="1" max="100">
+                    </div>
+                </div>
+
+                <!-- Tab: Strategy -->
+                <div id="tab-prompt" class="tab-pane">
+                    <div class="form-group">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <label>System Prompt</label>
+                            <div>
+                                <button id="btn-prompt-reset" class="btn-sm"
+                                    style="background:#e53e3e;color:white;border:none;padding:2px 8px;border-radius:4px;cursor:pointer;margin-right:8px;">↺
+                                    Reset to Default</button>
+                                <button id="btn-prompt-upload" class="btn-sm"
+                                    style="background:#2d3748;color:white;border:none;padding:2px 8px;border-radius:4px;cursor:pointer;">📤
+                                    Upload File</button>
+                            </div>
+                            <input type="file" id="prompt-file" accept=".md,.txt" style="display: none;">
+                        </div>
+                        <textarea id="cfg-prompt" rows="15" class="form-control"
+                            style="font-family:monospace; font-size:12px; margin-top:5px;"></textarea>
+                    </div>
+                </div>
+
+                <!-- Tab: Accounts -->
+                <div id="tab-accounts" class="tab-pane">
+                    <div class="form-group">
+                        <div
+                            style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 10px;">
+                            <label style="margin:0;">📊 Trading Accounts</label>
+                            <button id="btn-refresh-accounts" class="btn-sm"
+                                style="background:#2d3748;color:white;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;">🔄
+                                Refresh</button>
+                        </div>
+                        <div id="accounts-list"
+                            style="background: rgba(0,0,0,0.2); padding: 10px; border-radius: 4px; min-height: 100px; max-height: 200px; overflow-y: auto;">
+                            <p style="color: #718096; text-align: center;">Loading accounts...</p>
+                        </div>
+                    </div>
+
+                    <hr style="border-color: rgba(255,255,255,0.1); margin: 20px 0;">
+
+                    <div class="form-group">
+                        <label>➕ Add New Account</label>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                            <input type="text" id="new-account-id" class="form-control"
+                                placeholder="Account ID (e.g. sub-account-1)">
+                            <input type="text" id="new-account-name" class="form-control" placeholder="Display Name">
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px;">
+                            <select id="new-account-exchange" class="form-control">
+                                <option value="binance">Binance</option>
+                            </select>
+                            <label style="display:flex; align-items:center; cursor:pointer;">
+                                <input type="checkbox" id="new-account-testnet" checked style="margin-right: 8px;">
+                                <span>Testnet Mode</span>
+                            </label>
+                        </div>
+                        <button id="btn-add-account"
+                            style="margin-top: 10px; background: #00ff9d; color: #1a202c; border: none; padding: 8px 20px; border-radius: 4px; cursor: pointer; font-weight: bold;">Add
+                            Account</button>
+                        <p style="color: #a0aec0; font-size: 0.75em; margin-top: 8px;">Note: Set API keys in .env with
+                            format: ACCOUNT_{ID}_API_KEY</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button id="btn-save-settings" class="btn btn-primary"
+                    style="position:relative; z-index:9999; cursor:pointer;" onclick="(async function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const btn = e.target;
+                        const originalText = btn.textContent;
+                        btn.textContent = 'Saving...';
+                        btn.disabled = true;
+
+                        try {
+                            const elBinanceKey = document.getElementById('cfg-binance-key');
+                            const elBinanceSecret = document.getElementById('cfg-binance-secret');
+                            const elDeepseekKey = document.getElementById('cfg-deepseek-key');
+                            
+                            const data = {
+                                api_keys: {
+                                    binance_api_key: elBinanceKey ? elBinanceKey.value : '',
+                                    binance_secret_key: elBinanceSecret ? elBinanceSecret.value : '',
+                                    deepseek_api_key: elDeepseekKey ? elDeepseekKey.value : ''
+                                },
+                                trading: {
+                                    symbol: Array.from(document.querySelectorAll('input[name=\'cfg-symbol\']:checked')).map(cb => cb.value).join(','),
+                                    leverage: document.getElementById('cfg-leverage').value,
+                                    run_mode: document.getElementById('cfg-run-mode').value
+                                }
+                            };
+                            
+                            // Save Config
+                            const res = await fetch('/api/config', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(data)
+                            });
+                            if (!res.ok) throw new Error(await res.text());
+
+                            // Save Prompt
+                            const promptContent = document.getElementById('cfg-prompt').value;
+                            const promptRes = await fetch('/api/config/prompt', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ content: promptContent })
+                            });
+                            if (!promptRes.ok) throw new Error(await promptRes.text());
+                            
+                            alert('✅ SUCCESS: Configuration Saved!');
+                            document.getElementById('settings-modal').style.display = 'none';
+
+                        } catch (err) {
+                            alert('❌ ERROR: ' + err.message);
+                        } finally {
+                            btn.textContent = originalText;
+                            btn.disabled = false;
+                        }
+                    })(event)">Save Changes</button>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        /* Settings Modal Styles */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            backdrop-filter: blur(5px);
+        }
+
+        .settings-modal {
+            width: 600px;
+            max-width: 90vw;
+            background: #1a202c;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .modal-header h3 {
+            margin: 0;
+            color: #fff;
+        }
+
+        .btn-close {
+            background: none;
+            border: none;
+            color: #a0aec0;
+            font-size: 24px;
+            cursor: pointer;
+        }
+
+        .settings-tabs {
+            display: flex;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .tab-btn {
+            flex: 1;
+            padding: 12px;
+            background: none;
+            border: none;
+            color: #a0aec0;
+            cursor: pointer;
+            transition: all 0.2s;
+            border-bottom: 2px solid transparent;
+        }
+
+        .tab-btn:hover {
+            color: #fff;
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .tab-btn.active {
+            color: #00ff9d;
+            border-bottom-color: #00ff9d;
+            background: rgba(0, 255, 157, 0.05);
+        }
+
+        .settings-body {
+            padding: 20px;
+            min-height: 300px;
+            max-height: 60vh;
+            overflow-y: auto;
+        }
+
+        .tab-pane {
+            display: none;
+        }
+
+        .tab-pane.active {
+            display: block;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #a0aec0;
+            font-size: 0.9em;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 8px 12px;
+            background: #2d3748;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            color: #fff;
+        }
+
+        .form-control:focus {
+            outline: none;
+            border-color: #00ff9d;
+        }
+
+        /* Fix for Z-Index issues */
+        #settings-modal {
+            z-index: 10000 !important;
+        }
+
+        .modal-footer {
+            padding: 15px 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            text-align: right;
+            background: rgba(0, 0, 0, 0.2);
+        }
+    </style>
+    <script src="/static/app.js?v=debug_fix_controls"></script>
+    <script>
+        // EMERGENCY FIX & LOGIC V3
+        (function () {
+            console.log('🚑 Emergency Inline Script Loaded v3');
+            window.addEventListener('load', function () {
+                const btn = document.getElementById('btn-settings');
+                const modal = document.getElementById('settings-modal');
+                const closeBtn = document.getElementById('close-settings');
+
+                // 1. Button Logic
+                if (btn && modal) {
+                    btn.onclick = function (e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        modal.style.display = 'flex';
+                        if (typeof loadSettings === 'function') {
+                            loadSettings().then(() => {
+                                // Sync UI after load for current mode
+                                const ms = document.getElementById('cfg-run-mode');
+                                if (ms) {
+                                    const event = new Event('change');
+                                    ms.dispatchEvent(event);
+                                }
+                            }).catch(console.error);
+                        }
+                    };
+                    if (closeBtn) closeBtn.onclick = () => modal.style.display = 'none';
+                }
+
+                // 2. Tab Logic
+                const tabs = document.querySelectorAll('.tab-btn');
+                tabs.forEach(tab => {
+                    tab.onclick = function () {
+                        document.querySelectorAll('.tab-btn').forEach(t => t.classList.remove('active'));
+                        document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+
+                        this.classList.add('active');
+                        const paneId = this.getAttribute('data-tab');
+                        const pane = document.getElementById(paneId);
+                        if (pane) pane.classList.add('active');
+                    };
+                });
+
+                // 3. Mode Logic (Show/Hide Binance)
+                const modeSel = document.getElementById('cfg-run-mode');
+                const binSec = document.getElementById('binance-config-section');
+
+                if (modeSel && binSec) {
+                    const updateUI = () => {
+                        if (modeSel.value === 'test') {
+                            binSec.style.display = 'none';
+                        } else {
+                            binSec.style.display = 'block';
+                        }
+                    };
+                    modeSel.addEventListener('change', updateUI);
+                    setInterval(updateUI, 500); // Poll backup
+                }
+
+                // 4. LLM Provider Logic (Show/Hide API Key Fields)
+                const llmProviderSel = document.getElementById('cfg-llm-provider');
+                const llmKeyFields = document.querySelectorAll('.llm-key-field');
+
+                if (llmProviderSel && llmKeyFields.length > 0) {
+                    const updateLlmUI = () => {
+                        const selectedProvider = llmProviderSel.value;
+                        llmKeyFields.forEach(field => {
+                            if (field.dataset.provider === selectedProvider) {
+                                field.style.display = 'block';
+                            } else {
+                                field.style.display = 'none';
+                            }
+                        });
+                    };
+                    llmProviderSel.addEventListener('change', updateLlmUI);
+                    updateLlmUI(); // Initial call
+                }
+            });
+        })();
+    </script>
 </body>
 
 </html>

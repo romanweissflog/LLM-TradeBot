@@ -4,9 +4,26 @@
 import os
 import json
 import pandas as pd
+import numpy as np
 from datetime import datetime
 from typing import List, Dict, Optional
 from src.utils.logger import log
+
+
+class CustomJSONEncoder(json.JSONEncoder):
+    """Custom JSON Encoder to handle datetime and numpy types"""
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.strftime("%Y-%m-%d %H:%M:%S")
+        if isinstance(obj, (np.integer, np.int32, np.int64)):
+            return int(obj)
+        if isinstance(obj, (np.floating, np.float32, np.float64)):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, pd.Timestamp):
+            return obj.strftime("%Y-%m-%d %H:%M:%S")
+        return super().default(obj)
 
 
 class DataSaver:
@@ -110,7 +127,7 @@ class DataSaver:
         if 'json' in save_formats:
             path = os.path.join(date_folder, f'{filename_base}.json')
             with open(path, 'w', encoding='utf-8') as f:
-                json.dump({'metadata': metadata, 'klines': klines}, f, indent=2)
+                json.dump({'metadata': metadata, 'klines': klines}, f, indent=2, cls=CustomJSONEncoder)
             saved_files['json'] = path
             
         if 'csv' in save_formats:
@@ -190,7 +207,7 @@ class DataSaver:
         path = os.path.join(date_folder, filename)
         
         with open(path, 'w', encoding='utf-8') as f:
-            json.dump(context, f, indent=2, ensure_ascii=False)
+            json.dump(context, f, indent=2, ensure_ascii=False, cls=CustomJSONEncoder)
             
         log.debug(f"保存Agent上下文: {path}")
         return {'json': path}
@@ -248,7 +265,7 @@ class DataSaver:
         path = os.path.join(date_folder, filename)
         
         with open(path, 'w', encoding='utf-8') as f:
-            json.dump(decision, f, indent=2, ensure_ascii=False)
+            json.dump(decision, f, indent=2, ensure_ascii=False, cls=CustomJSONEncoder)
             
         log.debug(f"保存决策结果: {path}")
         return {'json': path}
@@ -271,7 +288,7 @@ class DataSaver:
         path = os.path.join(date_folder, filename)
         
         with open(path, 'w', encoding='utf-8') as f:
-            json.dump(record, f, indent=2, ensure_ascii=False)
+            json.dump(record, f, indent=2, ensure_ascii=False, cls=CustomJSONEncoder)
         
         # 追加CSV
         csv_path = os.path.join(date_folder, f'orders_{symbol}.csv')
@@ -303,7 +320,7 @@ class DataSaver:
         path = os.path.join(date_folder, filename)
         
         with open(path, 'w', encoding='utf-8') as f:
-            json.dump(audit_result, f, indent=2, ensure_ascii=False)
+            json.dump(audit_result, f, indent=2, ensure_ascii=False, cls=CustomJSONEncoder)
             
         log.debug(f"保存风控审计记录: {path}")
         return {'json': path}
@@ -327,7 +344,7 @@ class DataSaver:
         path = os.path.join(date_folder, filename)
         
         with open(path, 'w', encoding='utf-8') as f:
-            json.dump(prediction, f, indent=2, ensure_ascii=False)
+            json.dump(prediction, f, indent=2, ensure_ascii=False, cls=CustomJSONEncoder)
             
         log.debug(f"保存预测结果: {path}")
         return {'json': path}

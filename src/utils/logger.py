@@ -36,13 +36,14 @@ class ColoredLogger:
     
     def llm_output(self, message: str, decision: dict = None):
         """记录 LLM 输出（浅黄色背景）"""
+        from src.utils.json_utils import safe_json_dumps
         self._logger.opt(colors=True).info(
             f"<bold><light-yellow>{'=' * 60}</light-yellow></bold>\n"
             f"<bold><light-yellow>🧠 LLM 输出</light-yellow></bold>\n"
             f"<bold><light-yellow>{'=' * 60}</light-yellow></bold>"
         )
         if decision:
-            formatted_json = json.dumps(decision, indent=2, ensure_ascii=False)
+            formatted_json = safe_json_dumps(decision, indent=2, ensure_ascii=False)
             self._logger.opt(colors=True).info(f"<light-yellow>{formatted_json}</light-yellow>")
         self._logger.opt(colors=True).info(f"<bold><light-yellow>{'=' * 60}</light-yellow></bold>\n")
     

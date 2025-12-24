@@ -511,7 +511,7 @@ function renderDecisionTable(history, positions = []) {
 }
 
 function renderAccount(account) {
-    const fmt = num => `$${num.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+    const fmt = num => `$${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
     // Safety check helper
     const setTxt = (id, val) => {
@@ -519,8 +519,14 @@ function renderAccount(account) {
         if (el) el.textContent = val;
     };
 
+    // Calculate based on Total PnL (Total PnL = Equity - Initial)
+    // So: Initial = Equity - Total PnL
+    const initialBalance = account.total_equity - account.total_pnl;
+
+    setTxt('acc-initial', fmt(initialBalance));
     setTxt('acc-equity', fmt(account.total_equity));
-    setTxt('acc-wallet', fmt(account.wallet_balance));
+    // setTxt('acc-wallet', fmt(account.wallet_balance)); // Removed from UI
+
     // Header equity also if exists
     setTxt('header-equity', fmt(account.total_equity));
 
@@ -528,8 +534,13 @@ function renderAccount(account) {
     const pnlEl = document.getElementById('acc-pnl');
     if (pnlEl) {
         const pnlAmount = fmt(account.total_pnl);
-        const walletBalance = account.wallet_balance || account.total_equity - account.total_pnl;
-        const pnlPercentage = walletBalance > 0 ? ((account.total_pnl / walletBalance) * 100).toFixed(2) : 0;
+
+        // Calculate percentage based on initial balance
+        let pnlPercentage = 0;
+        if (initialBalance > 0) {
+            pnlPercentage = ((account.total_pnl / initialBalance) * 100).toFixed(2);
+        }
+
         const sign = account.total_pnl > 0 ? '+' : '';
 
         pnlEl.textContent = `${pnlAmount} (${sign}${pnlPercentage}%)`;
@@ -547,9 +558,9 @@ function renderChart(history, initialAmount = null) {
     // Also ensures we have valid data points
     const validHistory = history.filter(h => h.cycle && h.cycle >= 1);
 
-    // If no valid history (e.g. still in cycle 0), maybe show empty or all?
-    // Let's fallback to history if validHistory is empty preventing blank chart
-    const dataToShow = validHistory.length > 0 ? validHistory : [];
+    // If no valid history after filtering, fallback to showing ALL data (including cycle 0)
+    // This ensures the chart always shows something if there's any data
+    const dataToShow = validHistory.length > 0 ? validHistory : history;
 
     const times = dataToShow.map(h => h.time);
     const values = dataToShow.map(h => h.value);
@@ -869,6 +880,8 @@ function setControl(action, payload = {}) {
         })
         .catch(err => console.error('Control request failed:', err));
 }
+// Expose setControl globally for inline HTML access
+window.setControl = setControl;
 
 // Account Failure Alert Modal
 let alertShown = false;
@@ -955,6 +968,66 @@ function setupEventListeners() {
     const btnStop = document.getElementById('btn-stop');
     if (btnStop) btnStop.addEventListener('click', () => setControl('stop'));
 
+    // Initialize Settings
+    if (typeof initSettings === 'function') {
+        initSettings();
+    }
+
+    // Custom Prompt Upload Logic
+    const btnUpload = document.getElementById('btn-upload');
+    const fileInput = document.getElementById('file-upload');
+
+    if (btnUpload && fileInput) {
+        btnUpload.addEventListener('click', () => fileInput.click());
+
+        fileInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                // Show loading state
+                const originalText = btnUpload.textContent;
+                btnUpload.textContent = '⏳';
+                btnUpload.disabled = true;
+
+                const response = await fetch('/api/upload_prompt', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    // Success feedback
+                    btnUpload.textContent = '✅';
+                    btnUpload.title = "Custom Prompt Loaded: " + file.name;
+                    btnUpload.classList.add('success');
+
+                    // Reset after 3 seconds
+                    setTimeout(() => {
+                        btnUpload.textContent = originalText;
+                        btnUpload.disabled = false;
+                        btnUpload.classList.remove('success');
+                    }, 3000);
+                } else {
+                    throw new Error(result.detail || 'Upload failed');
+                }
+            } catch (err) {
+                console.error(err);
+                btnUpload.textContent = '❌';
+                alert('Failed to upload prompt: ' + err.message);
+
+                setTimeout(() => {
+                    btnUpload.textContent = '📤';
+                    btnUpload.disabled = false;
+                }, 3000);
+            }
+        });
+    }
+
 
 
     const intervalSel = document.getElementById('interval-selector');
@@ -965,3 +1038,420 @@ function setupEventListeners() {
         });
     }
 }
+
+/* Settings Modal Logic */
+function initSettings() {
+    const modal = document.getElementById('settings-modal');
+    const btnSettings = document.getElementById('btn-settings');
+    const btnClose = document.getElementById('close-settings');
+    const btnSave = document.getElementById('btn-save-settings');
+
+    // Open Modal
+    if (btnSettings) {
+        btnSettings.addEventListener('click', async () => {
+            modal.style.display = 'flex';
+            await loadSettings();
+        });
+    }
+
+    // Close Modal
+    if (btnClose) {
+        btnClose.addEventListener('click', () => {
+            modal.style.display = 'none';
+        });
+    }
+
+    // Save Settings
+    if (btnSave) {
+        // Remove existing listeners by cloning (simple way to prevent duplicate listeners if init called twice)
+        // const newBtn = btnSave.cloneNode(true);
+        // btnSave.parentNode.replaceChild(newBtn, btnSave);
+        // Note: cloning removes event listeners but might break specific bindings if not careful.
+        // Instead, we just ensure we only adding it once? or just accept it logging twice if added twice.
+
+        btnSave.onclick = async (e) => {
+            console.log('💾 Save Button Clicked');
+            e.preventDefault();
+
+            const originalText = btnSave.textContent;
+            btnSave.textContent = 'Saving...';
+            btnSave.disabled = true;
+            try {
+                await saveSettings();
+                await savePrompt();
+                modal.style.display = 'none';
+                alert('Configuration saved! Please restart the bot if you updated API keys.');
+            } catch (e) {
+                console.error(e);
+                alert('Error saving settings: ' + e.message);
+            } finally {
+                btnSave.textContent = originalText;
+                btnSave.disabled = false;
+            }
+        }; // End of onclick
+
+        // Expose global handler for HTML onclick fallback
+        window.triggerSaveConfig = async (e) => {
+            if (e) e.preventDefault();
+            console.log("Trigger Save Called");
+
+            const btn = document.getElementById('btn-save-settings');
+            const originalText = btn ? btn.textContent : 'Save';
+
+            if (btn) {
+                btn.textContent = 'Saving...';
+                btn.disabled = true;
+            }
+
+            try {
+                // Direct call logic to bypass potential stale listeners
+                await saveSettings();
+                await savePrompt();
+
+                // Success UI
+                const modal = document.getElementById('settings-modal');
+                if (modal) modal.style.display = 'none';
+
+                // Using browser confirm is safer than alert sometimes in async flows
+                // But alert is fine here.
+                alert('✅ CORRECTLY SAVED!\nConfiguration and Prompt updated.');
+
+            } catch (err) {
+                console.error(err);
+                alert('❌ SAVE FAILED:\n' + err.message);
+            } finally {
+                if (btn) {
+                    btn.textContent = originalText;
+                    btn.disabled = false;
+                }
+            }
+        };
+
+    } else {
+        console.error('❌ Save Button not found in Init');
+    }
+
+    // Tab Switching
+    const tabs = document.querySelectorAll('.tab-btn');
+    tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            // Remove active
+            document.querySelectorAll('.tab-btn').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+
+            // Add active
+            tab.classList.add('active');
+            document.getElementById(tab.dataset.tab).classList.add('active');
+        });
+    });
+
+    // Prompt Upload Logic
+    const btnPromptUpload = document.getElementById('btn-prompt-upload');
+    const promptInput = document.getElementById('prompt-file');
+    if (btnPromptUpload && promptInput) {
+        btnPromptUpload.addEventListener('click', () => promptInput.click());
+        promptInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                document.getElementById('cfg-prompt').value = e.target.result;
+            };
+            reader.readAsText(file);
+        });
+    }
+
+    // Reset Prompt Logic
+    const btnReset = document.getElementById('btn-prompt-reset');
+    if (btnReset) {
+        btnReset.addEventListener('click', async () => {
+            if (confirm('Are you sure you want to reset the System Prompt to default? This will overwrite your current edits.')) {
+                try {
+                    const res = await fetch('/api/config/default_prompt');
+                    if (res.ok) {
+                        const data = await res.json();
+                        document.getElementById('cfg-prompt').value = data.content;
+                    } else {
+                        alert('Failed to fetch default prompt');
+                    }
+                } catch (e) {
+                    console.error('Reset failed:', e);
+                }
+            }
+        });
+    }
+}
+
+async function loadSettings() {
+    try {
+        const res = await fetch('/api/config');
+        const config = await res.json();
+
+        // Fill Form
+        const safeVal = (v) => v || '';
+        document.getElementById('cfg-binance-key').value = safeVal(config.api_keys.binance_api_key);
+        document.getElementById('cfg-binance-secret').value = safeVal(config.api_keys.binance_secret_key);
+        document.getElementById('cfg-deepseek-key').value = safeVal(config.api_keys.deepseek_api_key);
+
+        // Multi-LLM Provider Keys
+        const setIfExists = (id, val) => { const el = document.getElementById(id); if (el) el.value = safeVal(val); };
+        setIfExists('cfg-openai-key', config.api_keys.openai_api_key);
+        setIfExists('cfg-claude-key', config.api_keys.claude_api_key);
+        setIfExists('cfg-qwen-key', config.api_keys.qwen_api_key);
+        setIfExists('cfg-gemini-key', config.api_keys.gemini_api_key);
+
+        // LLM Provider Selection
+        const llmProvider = config.llm?.provider || 'deepseek';
+        setIfExists('cfg-llm-provider', llmProvider);
+
+        // Trigger provider change to show correct API key field
+        const providerSel = document.getElementById('cfg-llm-provider');
+        if (providerSel) {
+            providerSel.value = llmProvider;
+            providerSel.dispatchEvent(new Event('change'));
+        }
+
+        // Load Symbols (Multi-select)
+        const savedSymbols = (config.trading.symbol || '').split(',').map(s => s.trim());
+        const checkboxes = document.querySelectorAll('input[name="cfg-symbol"]');
+        let anyChecked = false;
+        checkboxes.forEach(cb => {
+            if (savedSymbols.includes(cb.value)) {
+                cb.checked = true;
+                anyChecked = true;
+            } else {
+                cb.checked = false;
+            }
+        });
+        // Default to Select All if none saved, OR if it matches the legacy default 'BTCUSDT'
+        // This ensures users migrating or starting fresh get all options selected by default as requested.
+        const isLegacyDefault = savedSymbols.length === 1 && (savedSymbols[0] === 'BTCUSDT' || savedSymbols[0] === 'SOLUSDT' || savedSymbols[0] === '');
+
+        if (!anyChecked || isLegacyDefault) {
+            checkboxes.forEach(cb => cb.checked = true);
+        }
+        document.getElementById('cfg-leverage').value = safeVal(config.trading.leverage);
+        document.getElementById('cfg-run-mode').value = safeVal(config.trading.run_mode || 'test');
+
+        // Load Prompt
+        const promptRes = await fetch('/api/config/prompt');
+        const promptData = await promptRes.json();
+
+        // Auto-load default prompt if empty
+        if (!promptData.content || promptData.content.trim().length === 0) {
+            console.log("Empty prompt detected, fetching default...");
+            try {
+                const defaultRes = await fetch('/api/config/default_prompt');
+                if (defaultRes.ok) {
+                    const defaultData = await defaultRes.json();
+                    document.getElementById('cfg-prompt').value = defaultData.content;
+                }
+            } catch (e) {
+                console.error("Failed to fetch default prompt fallback", e);
+            }
+        } else {
+            document.getElementById('cfg-prompt').value = promptData.content;
+        }
+
+    } catch (e) {
+        console.error('Failed to load settings:', e);
+        // Do not alert here to avoid spamming on open
+    }
+}
+
+async function saveSettings() {
+    // Debug Point 1
+    // alert('Starting saveSettings()...'); 
+
+    // Validate Elements exist
+    const elBinanceKey = document.getElementById('cfg-binance-key');
+    const elBinanceSecret = document.getElementById('cfg-binance-secret');
+    const elDeepseekKey = document.getElementById('cfg-deepseek-key');
+    const elOpenaiKey = document.getElementById('cfg-openai-key');
+    const elClaudeKey = document.getElementById('cfg-claude-key');
+    const elQwenKey = document.getElementById('cfg-qwen-key');
+    const elGeminiKey = document.getElementById('cfg-gemini-key');
+    const elLlmProvider = document.getElementById('cfg-llm-provider');
+
+    if (!elBinanceKey || !elDeepseekKey) {
+        throw new Error("Critical Form Elements missing! Refresh page.");
+    }
+
+    const data = {
+        api_keys: {
+            binance_api_key: elBinanceKey.value,
+            binance_secret_key: elBinanceSecret ? elBinanceSecret.value : '',
+            deepseek_api_key: elDeepseekKey.value,
+            openai_api_key: elOpenaiKey ? elOpenaiKey.value : '',
+            claude_api_key: elClaudeKey ? elClaudeKey.value : '',
+            qwen_api_key: elQwenKey ? elQwenKey.value : '',
+            gemini_api_key: elGeminiKey ? elGeminiKey.value : ''
+        },
+        trading: {
+            symbol: Array.from(document.querySelectorAll('input[name="cfg-symbol"]:checked'))
+                .map(cb => cb.value).join(','),
+            leverage: document.getElementById('cfg-leverage').value,
+            run_mode: document.getElementById('cfg-run-mode').value
+        },
+        llm: {
+            llm_provider: elLlmProvider ? elLlmProvider.value : 'deepseek'
+        }
+    };
+
+    const res = await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    });
+
+    if (!res.ok) {
+        const errText = await res.text();
+        throw new Error('Failed to save config: ' + errText);
+    }
+}
+
+async function savePrompt() {
+    const content = document.getElementById('cfg-prompt').value;
+    const res = await fetch('/api/config/prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content })
+    });
+
+    if (!res.ok) throw new Error('Failed to save prompt');
+}
+
+// FALLBACK DEBUG & HANDLER
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('🔧 App.js loaded (Fallback)');
+    const btn = document.getElementById('btn-settings');
+    const modal = document.getElementById('settings-modal');
+    console.log('Btn:', btn, 'Modal:', modal);
+
+    // Initialize Settings Logic
+    if (typeof initSettings === 'function') {
+        initSettings();
+        console.log('✅ initSettings() called');
+    } else {
+        console.error('❌ initSettings function missing');
+    }
+
+    if (btn) {
+        btn.addEventListener('click', (e) => {
+            console.log('⚙️ Settings Clicked (Fallback)');
+            e.preventDefault(); // Prevent any default behavior
+            if (modal) {
+                modal.style.display = 'flex';
+                // Try load settings
+                if (typeof loadSettings === 'function') {
+                    loadSettings().catch(err => console.error(err));
+                }
+                // Load accounts when opening settings
+                if (typeof loadAccounts === 'function') {
+                    loadAccounts().catch(err => console.error(err));
+                }
+            } else {
+                alert('Error: Settings Modal not found in DOM');
+            }
+        });
+    } else {
+        console.error('Settings Button not found in DOM during fallback init');
+    }
+});
+
+// ============================================================================
+// Multi-Account Management Functions
+// ============================================================================
+
+async function loadAccounts() {
+    const container = document.getElementById('accounts-list');
+    if (!container) return;
+
+    container.innerHTML = '<p style="color: #718096; text-align: center;">Loading...</p>';
+
+    try {
+        const res = await fetch('/api/accounts');
+        const data = await res.json();
+
+        if (data.accounts && data.accounts.length > 0) {
+            container.innerHTML = data.accounts.map(acc => `
+                <div class="account-item" style="display: flex; justify-content: space-between; align-items: center; padding: 10px; margin-bottom: 8px; background: rgba(255,255,255,0.05); border-radius: 4px; border-left: 3px solid ${acc.enabled ? '#00ff9d' : '#718096'};">
+                    <div>
+                        <span style="font-weight: 600; color: #e0e6ed;">${acc.account_name}</span>
+                        <span style="color: #718096; font-size: 0.8em; margin-left: 10px;">${acc.exchange_type}</span>
+                        ${acc.testnet ? '<span style="background: #ecc94b; color: #1a202c; padding: 1px 6px; border-radius: 3px; font-size: 0.7em; margin-left: 8px;">TESTNET</span>' : ''}
+                        ${acc.has_api_key ? '<span style="color: #00ff9d; font-size: 0.75em; margin-left: 8px;">✓ API Key</span>' : '<span style="color: #e53e3e; font-size: 0.75em; margin-left: 8px;">✗ No API Key</span>'}
+                    </div>
+                    <button onclick="deleteAccount('${acc.id}')" style="background: #e53e3e; color: white; border: none; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 0.8em;">Remove</button>
+                </div>
+            `).join('');
+        } else {
+            container.innerHTML = '<p style="color: #718096; text-align: center;">No accounts configured.<br>Add one below or create config/accounts.json</p>';
+        }
+    } catch (e) {
+        console.error('Failed to load accounts:', e);
+        container.innerHTML = '<p style="color: #e53e3e; text-align: center;">Failed to load accounts</p>';
+    }
+}
+
+async function deleteAccount(accountId) {
+    if (!confirm(`Are you sure you want to remove this account?`)) return;
+
+    try {
+        const res = await fetch(`/api/accounts/${accountId}`, { method: 'DELETE' });
+        if (res.ok) {
+            await loadAccounts();
+        } else {
+            const err = await res.json();
+            alert('Failed to remove account: ' + (err.detail || 'Unknown error'));
+        }
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
+}
+
+// Add Account Button Handler
+document.addEventListener('DOMContentLoaded', () => {
+    const addBtn = document.getElementById('btn-add-account');
+    const refreshBtn = document.getElementById('btn-refresh-accounts');
+
+    if (addBtn) {
+        addBtn.addEventListener('click', async () => {
+            const id = document.getElementById('new-account-id')?.value?.trim();
+            const name = document.getElementById('new-account-name')?.value?.trim();
+            const exchange = document.getElementById('new-account-exchange')?.value || 'binance';
+            const testnet = document.getElementById('new-account-testnet')?.checked ?? true;
+
+            if (!id || !name) {
+                alert('Please enter both Account ID and Display Name');
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/accounts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id, name, exchange, testnet, enabled: true })
+                });
+
+                if (res.ok) {
+                    // Clear form
+                    document.getElementById('new-account-id').value = '';
+                    document.getElementById('new-account-name').value = '';
+                    // Reload list
+                    await loadAccounts();
+                    alert('✅ Account added successfully!\\nRemember to set API keys in .env file.');
+                } else {
+                    const err = await res.json();
+                    alert('Failed to add account: ' + (err.detail || 'Unknown error'));
+                }
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        });
+    }
+
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', loadAccounts);
+    }
+});

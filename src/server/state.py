@@ -94,7 +94,34 @@ class SharedState:
             if len(self.equity_history) > 200:
                 self.equity_history.pop(0)
 
+    def _serialize_obj(self, obj):
+        """Recursively serialize non-JSON-compatible types (datetime, numpy, pd.Timestamp)"""
+        import numpy as np
+        import pandas as pd
+        from datetime import datetime
+        if isinstance(obj, datetime):
+            return obj.strftime("%Y-%m-%d %H:%M:%S")
+        if isinstance(obj, pd.Timestamp):
+            return obj.strftime("%Y-%m-%d %H:%M:%S")
+        if isinstance(obj, (np.integer, np.int32, np.int64)):
+            return int(obj)
+        if isinstance(obj, (np.floating, np.float32, np.float64)):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, dict):
+            return {k: self._serialize_obj(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [self._serialize_obj(v) for v in obj]
+        return obj
+
     def update_decision(self, decision: Dict):
+        """Update the latest decision and add to history"""
+        from datetime import datetime
+        
+        # Clean non-serializable objects to prevent JSON errors
+        decision = self._serialize_obj(decision)
+        
         self.latest_decision = decision
         self.critic_confidence = decision.get('confidence', 0.0)
         
@@ -103,9 +130,10 @@ class SharedState:
             decision['timestamp'] = datetime.now().strftime("%H:%M:%S")
             
         # Add to history
-        self.decision_history.insert(0, decision) # Prepend
+        self.decision_history.insert(0, decision)  # Prepend
         if len(self.decision_history) > 100:
             self.decision_history.pop()
+        
         self.last_update = datetime.now().strftime("%H:%M:%S")
     
     def record_account_success(self):

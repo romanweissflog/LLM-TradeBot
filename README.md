@@ -17,6 +17,8 @@ Intelligent Multi-Agent Quantitative Trading Bot based on the **Adversarial Deci
 
 - 🕵️ **Perception First**: Unlike strict indicator-based systems, this framework prioritizes judging "IF we should trade" before deciding "HOW to trade".
 - 🤖 **Multi-Agent Collaboration**: 8 highly specialized Agents operating independently to form an adversarial verification chain.
+- 🧠 **Multi-LLM Support**: Seamlessly switch between DeepSeek, OpenAI, Claude, Qwen, and Gemini via Dashboard settings.
+- 📊 **Multi-Account Trading**: Manage multiple exchange accounts with unified API abstraction (currently Binance, extensible).
 - ⚡ **Async Concurrency**: Currently fetches multi-timeframe data (5m/15m/1h) concurrently, ensuring data alignment at the snapshot moment.
 - 🛡️ **Safety First**: Stop-loss direction correction, capital pre-rehearsal, and veto mechanisms to safeguard live trading.
 - 📊 **Full-Link Auditing**: Every decision's adversarial process and confidence penalty details are recorded, achieving true "White-Box" decision-making.
@@ -95,6 +97,14 @@ Edit `config.yaml` to set parameters:
 - Max position size (max_position_size)
 - Leverage (leverage)
 - Stop loss/Take profit % (stop_loss_pct, take_profit_pct)
+
+##### ⚙️ Dashboard Settings
+
+You can also configure all settings from the Dashboard:
+
+![Settings Tabs](./docs/settings_tabs_composite.png)
+
+*Settings Modal with 4 tabs: API Keys (LLM Provider), Accounts (Multi-Account), Trading, Strategy (Prompt)*
 
 #### 4. Start the Bot
 
@@ -221,8 +231,21 @@ LLM-TradeBot/
 │   ├── agents/            # Multi-Agent Definitions (DataSync, Quant, Decision, Risk)
 │   ├── api/               # Binance API Client
 │   ├── data/              # Data Processing (processor, validator)
+│   ├── exchanges/         # 🆕 Multi-Account Exchange Abstraction
+│   │   ├── base.py       # BaseTrader ABC + Data Models
+│   │   ├── binance_trader.py  # Binance Futures Implementation
+│   │   ├── factory.py    # Exchange Factory
+│   │   └── account_manager.py # Multi-Account Manager
 │   ├── execution/         # Order Execution Engine
 │   ├── features/          # Feature Engineering
+│   ├── llm/               # 🆕 Multi-LLM Interface
+│   │   ├── base.py       # BaseLLMClient ABC
+│   │   ├── openai_client.py  # OpenAI Implementation
+│   │   ├── deepseek_client.py # DeepSeek Implementation
+│   │   ├── claude_client.py  # Anthropic Claude
+│   │   ├── qwen_client.py    # Alibaba Qwen
+│   │   ├── gemini_client.py  # Google Gemini
+│   │   └── factory.py    # LLM Factory
 │   ├── monitoring/        # Monitoring & Logging
 │   ├── risk/              # Risk Management
 │   ├── strategy/          # LLM Decision Engine
@@ -239,9 +262,11 @@ LLM-TradeBot/
 │   ├── decisions/         # Final Decision Results
 │   └── execution/         # Execution Records
 │
+├── config/                # Configuration Files
+│   └── accounts.example.json  # 🆕 Multi-Account Config Template
+│
 ├── logs/                  # System Runtime Logs
 ├── tests/                 # Unit Tests
-├── config/                # Configuration Files
 │
 ├── main.py                # Main Entry Point (Multi-Agent Loop)
 ├── config.yaml            # Trading Parameters
@@ -468,6 +493,14 @@ data/
 ---
 
 ## 🎉 Latest Updates
+
+**2025-12-24**:
+
+- ✅ **Multi-LLM Support**: Added support for 5 LLM providers (DeepSeek, OpenAI, Claude, Qwen, Gemini) with unified interface.
+- ✅ **Dashboard LLM Settings**: Switch LLM provider and API keys directly from Dashboard Settings.
+- ✅ **Multi-Account Architecture**: New `src/exchanges/` module with `BaseTrader` abstraction for multi-exchange support.
+- ✅ **Account Manager**: Manage multiple trading accounts via Dashboard or `config/accounts.json`.
+- ✅ **API Endpoints**: Added `/api/accounts` and `/api/exchanges` for account management.
 
 **2025-12-23**:
 

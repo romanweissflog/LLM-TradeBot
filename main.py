@@ -40,6 +40,7 @@ from src.utils.logger import log, setup_logger
 from src.utils.trade_logger import trade_logger
 from src.utils.data_saver import DataSaver
 from src.data.processor import MarketDataProcessor  # ✅ Corrected Import
+from src.exchanges import AccountManager, ExchangeAccount, ExchangeType  # ✅ Multi-Account Support
 from src.features.technical_features import TechnicalFeatureEngineer
 from src.server.state import global_state
 from src.utils.semantic_converter import SemanticConverter  # ✅ Global Import
@@ -101,13 +102,19 @@ class MultiAgentTradingBot:
         print("="*80)
         
         self.config = Config()
-        # 多币种支持: 读取 symbols 列表，兼容旧版 symbol 单值配置
+        # 多币种支持: 优先读取 trading.symbols (list)，否则读取 trading.symbol (str/csv)
         symbols_config = self.config.get('trading.symbols', None)
-        if symbols_config:
+        
+        if symbols_config and isinstance(symbols_config, list):
             self.symbols = symbols_config
         else:
-            # 向后兼容: 使用旧版 trading.symbol 配置
-            self.symbols = [self.config.get('trading.symbol', 'BTCUSDT')]
+            # 向后兼容: 使用旧版 trading.symbol 配置 (支持 CSV 字符串 "BTCUSDT,ETHUSDT")
+            symbol_str = self.config.get('trading.symbol', 'BTCUSDT')
+            if ',' in symbol_str:
+                self.symbols = [s.strip() for s in symbol_str.split(',') if s.strip()]
+            else:
+                self.symbols = [symbol_str]
+                
         self.primary_symbol = self.config.get('trading.primary_symbol', self.symbols[0])
         self.current_symbol = self.primary_symbol  # 当前处理的交易对
         self.test_mode = test_mode
@@ -125,6 +132,10 @@ class MultiAgentTradingBot:
         self.risk_manager = RiskManager()
         self.execution_engine = ExecutionEngine(self.client, self.risk_manager)
         self.saver = DataSaver() # ✅ 初始化 Multi-Agent 数据保存器
+        
+        # ✅ 初始化多账户管理器
+        self.account_manager = AccountManager()
+        self._init_accounts()
         
         # 初始化共享 Agent (与币种无关)
         print("\n🚀 初始化Agent...")
@@ -172,6 +183,60 @@ class MultiAgentTradingBot:
             global_state.trade_history = []
             print("  🧪 测试模式：不加载历史记录，仅显示本次运行数据")
     
+    def _init_accounts(self):
+        """
+        Initialize trading accounts from config or legacy .env
+        
+        Priority:
+        1. Load from config/accounts.json if exists
+        2. Auto-create default account from legacy .env if no accounts loaded
+        """
+        import os
+        from pathlib import Path
+        
+        config_path = Path(__file__).parent / "config" / "accounts.json"
+        
+        # Try to load from config file
+        loaded = self.account_manager.load_from_file(str(config_path))
+        
+        if loaded == 0:
+            # No accounts.json found - create default from legacy .env
+            log.info("No accounts.json found, creating default account from .env")
+            
+            api_key = os.environ.get('BINANCE_API_KEY', '')
+            secret_key = os.environ.get('BINANCE_SECRET_KEY', '')
+            testnet = os.environ.get('BINANCE_TESTNET', 'true').lower() == 'true'
+            
+            if api_key:
+                default_account = ExchangeAccount(
+                    id='main-binance',
+                    user_id='default',
+                    exchange_type=ExchangeType.BINANCE,
+                    account_name='Main Binance Account',
+                    enabled=True,
+                    api_key=api_key,
+                    secret_key=secret_key,
+                    testnet=testnet or self.test_mode
+                )
+                self.account_manager.add_account(default_account)
+                log.info(f"✅ Created default account: {default_account.account_name}")
+            else:
+                log.warning("No API key found in .env - running in demo mode")
+        
+        # Log summary
+        accounts = self.account_manager.list_accounts(enabled_only=True)
+        if accounts:
+            print(f"  📊 已加载 {len(accounts)} 个交易账户:")
+            for acc in accounts:
+                print(f"     - {acc.account_name} ({acc.exchange_type.value}, testnet={acc.testnet})")
+    
+    def get_accounts(self):
+        """Get list of enabled trading accounts."""
+        return self.account_manager.list_accounts(enabled_only=True)
+    
+    async def get_trader(self, account_id: str):
+        """Get trader instance for a specific account."""
+        return await self.account_manager.get_trader(account_id)
 
 
     async def run_trading_cycle(self) -> Dict:
@@ -1360,10 +1425,17 @@ class MultiAgentTradingBot:
     
     def get_statistics(self) -> Dict:
         """获取统计信息"""
-        return {
-            'decision_core': self.decision_core.get_statistics(),
+        stats = {
             'risk_audit': self.risk_audit.get_audit_report(),
         }
+        # DeepSeek 模式下没有 decision_core
+        if hasattr(self, 'strategy_engine'):
+            # self.strategy_engine 目前没有 get_statistics 方法，但可以返回基本信息
+            stats['strategy_engine'] = {
+                'provider': self.strategy_engine.provider,
+                'model': self.strategy_engine.model
+            }
+        return stats
 
     def start_account_monitor(self):
         """Start a background thread to monitor account equity in real-time"""
@@ -1447,8 +1519,8 @@ class MultiAgentTradingBot:
         
         try:
             while global_state.is_running:
-                # Check pause state
-                if global_state.execution_mode == 'Paused':
+                # Check pause/stop state
+                if global_state.execution_mode in ['Paused', 'Stopped']:
                     # 首次进入暂停时打印日志
                     if not hasattr(self, '_pause_logged') or not self._pause_logged:
                         print("\n⏸️ 系统已暂停，等待恢复...")
@@ -1607,12 +1679,16 @@ class MultiAgentTradingBot:
         # Equity = Balance (Realized) + Unrealized PnL
         total_equity = global_state.virtual_balance + total_unrealized_pnl
         
+        # 计算真实总盈亏 (相比初始资金)
+        # Total PnL = Current Equity - Initial Balance
+        real_total_pnl = total_equity - global_state.virtual_initial_balance
+        
         # 更新 Global State
         global_state.update_account(
             equity=total_equity,
             available=global_state.virtual_balance,
             wallet=global_state.virtual_balance,
-            pnl=total_unrealized_pnl
+            pnl=real_total_pnl  # ✅ Fix: Pass total profit/loss from start
         )
 
 def start_server():
@@ -1637,6 +1713,18 @@ def main():
     parser.add_argument('--interval', type=float, default=3.0, help='持续运行间隔（分钟）')
     
     args = parser.parse_args()
+    
+    # [NEW] Check RUN_MODE from .env (Config Manager integration)
+    import os
+    env_run_mode = os.getenv('RUN_MODE', 'test').lower()
+    
+    # Priority: Command line > Env Var
+    if not args.test and env_run_mode == 'test':
+        args.test = True
+    elif args.test and env_run_mode == 'live':
+        pass # Command line override to force test? or live? Let's say explicit CLI wins.
+        
+    print(f"🔧 Startup Mode: {'TEST' if args.test else 'LIVE'} (Env: {env_run_mode})")
     
     # 测试模式默认 1 分钟周期，实盘模式默认 3 分钟
     if args.test and args.interval == 3.0:  # 如果是测试模式且用户没有指定间隔
@@ -1673,6 +1761,9 @@ def main():
         # or exit immediately. Usually 'once' implies run and exit.
         
     else:
+        # [CHANGE] Default to Stopped to require user confirmation
+        global_state.execution_mode = "Stopped"
+        log.info("⏸️ System ready (Stopped). Waiting for user to START from Dashboard.")
         bot.run_continuous(interval_minutes=args.interval)
 
 if __name__ == '__main__':

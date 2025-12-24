@@ -42,16 +42,39 @@ class Config:
     
     def _override_from_env(self):
         """从环境变量覆盖配置"""
+        # Binance
         if os.getenv('BINANCE_API_KEY'):
             self._config['binance']['api_key'] = os.getenv('BINANCE_API_KEY')
         if os.getenv('BINANCE_API_SECRET'):
             self._config['binance']['api_secret'] = os.getenv('BINANCE_API_SECRET')
+        
+        # DeepSeek (向后兼容)
         if os.getenv('DEEPSEEK_API_KEY'):
             self._config['deepseek']['api_key'] = os.getenv('DEEPSEEK_API_KEY')
+        
+        # Redis
         if os.getenv('REDIS_HOST'):
             self._config['redis']['host'] = os.getenv('REDIS_HOST')
         if os.getenv('REDIS_PORT'):
             self._config['redis']['port'] = int(os.getenv('REDIS_PORT'))
+        
+        # LLM 多提供商支持
+        if 'llm' not in self._config:
+            self._config['llm'] = {}
+        
+        # API Keys for each provider
+        llm_api_keys = {
+            'openai': os.getenv('OPENAI_API_KEY'),
+            'deepseek': os.getenv('DEEPSEEK_API_KEY'),
+            'claude': os.getenv('CLAUDE_API_KEY'),
+            'qwen': os.getenv('QWEN_API_KEY'),
+            'gemini': os.getenv('GEMINI_API_KEY'),
+        }
+        self._config['llm']['api_keys'] = {k: v for k, v in llm_api_keys.items() if v}
+        
+        # Custom base URL (for proxies)
+        if os.getenv('LLM_BASE_URL'):
+            self._config['llm']['base_url'] = os.getenv('LLM_BASE_URL')
     
     def get(self, key_path: str, default=None):
         """
@@ -95,6 +118,10 @@ class Config:
     @property
     def backtest(self):
         return self._config.get('backtest', {})
+    
+    @property
+    def llm(self):
+        return self._config.get('llm', {})
 
 
 # 全局配置实例

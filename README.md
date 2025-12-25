@@ -370,61 +370,73 @@ LLM-TradeBot/
 ```mermaid
 graph TB
     subgraph "1️⃣ Data Collection Layer"
-        A[🕵️ DataSyncAgent] --> MS[MarketSnapshot<br/>5m/15m/1h + External Data]
+        A["🕵️ DataSyncAgent<br/>(The Oracle)"] --> MS["MarketSnapshot<br/>5m/15m/1h K-lines"]
     end
     
     subgraph "2️⃣ Quant Analysis Layer"
-        MS --> QA[👨‍🔬 QuantAnalystAgent]
-        QA --> TS[TrendSubAgent]
-        QA --> OS[OscillatorSubAgent]
-        QA --> SS[SentimentSubAgent]
-        TS & OS & SS --> QR[quant_analysis]
+        MS --> QA["👨‍🔬 QuantAnalystAgent<br/>(The Strategist)"]
+        QA --> TS["📈 TrendSubAgent"]
+        QA --> OS["📊 OscillatorSubAgent"]
+        QA --> SS["💹 SentimentSubAgent"]
+        TS & OS & SS --> QR["Quant Signals"]
     end
 
     subgraph "3️⃣ Prediction Layer"
-        MS --> PA[🔮 PredictAgent]
-        PA --> ML[LightGBM Model<br/>Auto-Train 2h]
-        ML --> PR[Prediction<br/>P_Up, Conf]
+        MS --> PA["🔮 PredictAgent<br/>(The Prophet)"]
+        PA --> ML["LightGBM Model<br/>Auto-Train 2h"]
+        ML --> PR["P_Up Prediction"]
     end
 
     subgraph "4️⃣ Bull/Bear Adversarial Layer"
-        MS --> BULL[🐂 Bull Agent<br/>Optimist]
-        MS --> BEAR[🐻 Bear Agent<br/>Pessimist]
-        BULL --> BP[Bull Perspective<br/>Stance, Reasons]
-        BEAR --> BRP[Bear Perspective<br/>Stance, Reasons]
+        MS --> BULL["🐂 Bull Agent<br/>(The Optimist)"]
+        MS --> BEAR["🐻 Bear Agent<br/>(The Pessimist)"]
+        BULL --> BP["Bull Perspective"]
+        BEAR --> BRP["Bear Perspective"]
     end
     
     subgraph "5️⃣ Reflection Layer"
-        TH[Trade History<br/>Last 10 Trades] --> REF[🧠 ReflectionAgent<br/>The Philosopher]
-        REF --> RI[Reflection Insights<br/>Patterns, Recommendations]
+        TH["📜 Trade History<br/>Last 10 Trades"] --> REF["🧠 ReflectionAgent<br/>(The Philosopher)"]
+        REF --> RI["Reflection Insights<br/>Patterns & Recommendations"]
     end
     
-    subgraph "6️⃣ Decision Adversarial Layer"
-        QR & PR & BP & BRP & RI --> DC[⚖️ DecisionCoreAgent<br/>Weighted Voting]
-        DC --> RD[RegimeDetector]
-        DC --> POS[PositionAnalyzer]
-        RD & POS --> VR[VoteResult<br/>Action, Conf]
+    subgraph "6️⃣ Decision Layer"
+        QR & PR & BP & BRP & RI --> DC["⚖️ DecisionCoreAgent<br/>(The Critic)"]
+        DC --> RD["RegimeDetector"]
+        DC --> POS["PositionAnalyzer"]
+        RD & POS --> VR["VoteResult<br/>Action + Confidence"]
     end
     
     subgraph "7️⃣ Risk Audit Layer"
-        VR --> RA[🛡️ RiskAuditAgent<br/>Veto Power]
-        RA --> AR[AuditResult<br/>Risk, Guard]
+        VR --> RA["🛡️ RiskAuditAgent<br/>(The Guardian)"]
+        RA --> AR["AuditResult<br/>Risk Level + Guard"]
     end
     
     subgraph "8️⃣ Execution Layer"
-        AR --> EE[🚀 ExecutionEngine]
-        EE -.-> TH
+        AR --> EE["🚀 ExecutionEngine<br/>(The Executor)"]
+        EE -.->|"Trade Complete"| TH
     end
     
-    style A fill:#4A90E2,color:#fff
-    style QA fill:#7ED321,color:#fff
-    style PA fill:#BD10E0,color:#fff
-    style BULL fill:#F8E71C,color:#333
-    style BEAR fill:#F8E71C,color:#333
-    style REF fill:#00CED1,color:#fff
-    style DC fill:#F5A623,color:#fff
-    style RA fill:#D0021B,color:#fff
-    style EE fill:#9013FE,color:#fff
+    %% Styling for Agent Nodes
+    style A fill:#4A90E2,color:#fff,stroke:#2563EB,stroke-width:2px
+    style QA fill:#7ED321,color:#fff,stroke:#059669,stroke-width:2px
+    style PA fill:#BD10E0,color:#fff,stroke:#9333EA,stroke-width:2px
+    style BULL fill:#F8E71C,color:#333,stroke:#CA8A04,stroke-width:2px
+    style BEAR fill:#F8E71C,color:#333,stroke:#CA8A04,stroke-width:2px
+    style REF fill:#00CED1,color:#fff,stroke:#0891B2,stroke-width:2px
+    style DC fill:#F5A623,color:#fff,stroke:#EA580C,stroke-width:2px
+    style RA fill:#D0021B,color:#fff,stroke:#DC2626,stroke-width:2px
+    style EE fill:#9013FE,color:#fff,stroke:#7C3AED,stroke-width:2px
+    
+    %% Styling for Output Nodes
+    style MS fill:#1E3A5F,color:#fff
+    style QR fill:#1E3A5F,color:#fff
+    style PR fill:#1E3A5F,color:#fff
+    style BP fill:#1E3A5F,color:#fff
+    style BRP fill:#1E3A5F,color:#fff
+    style RI fill:#1E3A5F,color:#fff
+    style VR fill:#1E3A5F,color:#fff
+    style AR fill:#1E3A5F,color:#fff
+    style TH fill:#1E3A5F,color:#fff
 ```
 
 > 📖 **Detailed Docs**: See [Data Flow Analysis](./docs/data_flow_analysis.md) for complete mechanisms.

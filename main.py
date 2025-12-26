@@ -1727,8 +1727,10 @@ class MultiAgentTradingBot:
 
 def start_server():
     """Start FastAPI server in a separate thread"""
-    print("\n🌍 Starting Web Dashboard at http://localhost:8000")
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="error")
+    import os
+    port = int(os.getenv("PORT", 8000))
+    print(f"\n🌍 Starting Web Dashboard at http://0.0.0.0:{port}")
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="error")
 
 # ============================================
 # 主入口

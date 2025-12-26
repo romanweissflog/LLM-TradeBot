@@ -171,24 +171,66 @@ class OscillatorSubAgent:
             
             details['1h_rsi'] = float(last_rsi_1h)
         
+        # 4. 15m MACD
+        score_macd = 0
+        macd_val = 0
+        macd_signal = 0
+        
+        if not stable_15m.empty:
+            if 'macd' in stable_15m.columns and 'macd_signal' in stable_15m.columns:
+                macd_val = stable_15m['macd'].iloc[-1]
+                macd_signal = stable_15m['macd_signal'].iloc[-1]
+                macd_hist = stable_15m['macd_hist'].iloc[-1]
+            else:
+                # Fallback calculation
+                from ta.trend import MACD
+                macd = MACD(close=stable_15m['close'])
+                macd_val = macd.macd().iloc[-1] if len(stable_15m) > 0 else 0
+                macd_signal = macd.macd_signal().iloc[-1] if len(stable_15m) > 0 else 0
+                macd_hist = macd.macd_diff().iloc[-1] if len(stable_15m) > 0 else 0
+            
+            if macd_val > macd_signal:
+                score_macd = 15
+                details['macd_status'] = "金叉"
+            else:
+                score_macd = -15
+                details['macd_status'] = "死叉"
+                
+            # Histogram strength check
+            if abs(macd_hist) < 5:  # Weak momentum
+                score_macd = score_macd // 2
+                
+            details['macd_val'] = float(macd_val)
+            details['macd_signal_val'] = float(macd_signal)
+            details['macd_hist'] = float(macd_hist)
+        
         # Calculate Total Score
         total_score = None
-        # Require at least 1h or 15m to be valid
+        # Require at least one valid indicator
         if osc_1h_score is not None or osc_15m_score is not None:
-             total_score = int((osc_5m_score or 0) * 0.3 + (osc_15m_score or 0) * 0.3 + (osc_1h_score or 0) * 0.4)
+             # Weights: 5m(30%) + 15m(25%) + 1h(25%) + MACD(20%)
+             total_score = int(
+                 (osc_5m_score or 0) * 0.3 + 
+                 (osc_15m_score or 0) * 0.25 + 
+                 (osc_1h_score or 0) * 0.25 +
+                 (score_macd or 0) * 0.2
+             )
              total_score = max(-100, min(100, total_score))
         
         return {
             'score': total_score if total_score is not None else 0,
             'details': details,
             'confidence': abs(total_score) if total_score is not None else 0,
-            'total_osc_score': total_score if total_score is not None else 0,  # 修复：防止 None 导致格式化报错
+            'total_osc_score': total_score if total_score is not None else 0,
             'osc_5m_score': osc_5m_score if osc_5m_score is not None else 0,
             'osc_15m_score': osc_15m_score if osc_15m_score is not None else 0,
             'osc_1h_score': osc_1h_score if osc_1h_score is not None else 0,
+            'osc_macd_score': score_macd,
             'rsi_5m': details.get('5m_rsi', 50),
             'rsi_15m': details.get('15m_rsi', 50),
-            'rsi_1h': details.get('1h_rsi', 50)
+            'rsi_1h': details.get('1h_rsi', 50),
+            'macd_15m': details.get('macd_val', 0),
+            'macd_signal_15m': details.get('macd_signal_val', 0)
         }
 
 

@@ -186,8 +186,8 @@
                 <div id="login-hint"
                     style="display: none; margin-top: 10px; font-size: 13px; color: rgba(255,255,255,0.5); line-height: 1.5; text-align: left;">
                     <strong style="color:rgba(255,255,255,0.8)">Login Modes:</strong><br>
-                    • <strong>Admin:</strong> Enter password for full control.<br>
-                    • <strong>User:</strong> Leave empty for read-only access.
+                    • <strong>User:</strong> Default (pwd: guest) for Read-Only.<br>
+                    • <strong>Admin:</strong> Use pwd <code>EthanAlgoX</code> for Full Control.
                 </div>
             </div>
             <button type="submit" id="btn-submit" class="btn-login">Unlock Dashboard</button>
@@ -214,10 +214,11 @@
                 const data = await res.json();
                 if (data.deployment_mode === 'railway') {
                     hintEl.style.display = 'block';
-                    // Railway: Default empty (User Role is default)
+                    // Railway: Default autofill 'guest' (User Role)
+                    input.value = 'guest';
                 } else {
-                    // Local: Default autofill 'admin' for convenience
-                    input.value = 'admin';
+                    // Local: Default autofill 'EthanAlgoX' (Admin Role) for convenience
+                    input.value = 'EthanAlgoX';
                 }
             } catch (e) {
                 console.error('Failed to check mode:', e);

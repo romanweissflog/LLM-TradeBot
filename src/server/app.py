@@ -83,11 +83,11 @@ async def login(response: Response, data: LoginRequest):
     role = None
     
     # Universal Login Logic (Robust for both Local and Railway)
-    # 1. Admin Login: Password matches WEB_PASSWORD or hardcoded fallback 'admin'
+    # 1. Admin Login: Password matches WEB_PASSWORD or hardcoded known admin passwords
     if data.password == WEB_PASSWORD or data.password == "admin" or data.password == "EthanAlgoX":
         role = 'admin'
-    # 2. User Login: Empty password -> Read Only
-    elif not data.password:
+    # 2. User Login: Password is 'guest' OR Empty -> Read Only
+    elif not data.password or data.password == "guest":
         role = 'user'
 
     if role:

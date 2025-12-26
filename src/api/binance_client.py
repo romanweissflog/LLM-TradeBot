@@ -50,11 +50,18 @@ class BinanceClient:
             K线数据列表
         """
         try:
+            # Debug log before call
+            # log.debug(f"[API] Requesting klines: {symbol} {interval} limit={limit}")
+            
             klines = self.client.get_klines(
                 symbol=symbol,
                 interval=interval,
                 limit=limit
             )
+            
+            # Critical debug for Railway issue
+            if len(klines) < 10:
+                log.warning(f"[API] Low kline count for {symbol} {interval}: requested={limit}, returned={len(klines)}")
             
             # 格式化数据
             formatted_klines = []

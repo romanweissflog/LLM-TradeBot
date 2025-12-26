@@ -43,6 +43,31 @@ class BinanceTrader(BaseTrader):
         self._funding_cache: Dict[str, tuple] = {}
         self._cache_duration = 3600  # 1 hour
     
+    def _normalize_symbol(self, symbol: str) -> str:
+        """
+        Normalize symbol format from TradingView to Binance API format.
+        
+        Converts formats like:
+        - ETH/USDT.P -> ETHUSDT
+        - BTC/USDT.P -> BTCUSDT
+        - ETHUSDT -> ETHUSDT (unchanged)
+        
+        Args:
+            symbol: Symbol in any supported format
+            
+        Returns:
+            Normalized symbol for Binance API
+        """
+        # Remove .P suffix (TradingView perpetual contract indicator)
+        if symbol.endswith(".P") or symbol.endswith(".PERP"):
+            symbol = symbol.rsplit(".", 1)[0]
+        
+        # Remove slash separator
+        symbol = symbol.replace("/", "")
+        
+        # Convert to uppercase
+        return symbol.upper()
+    
     async def initialize(self) -> bool:
         """Initialize Binance client connection."""
         try:
@@ -126,24 +151,30 @@ class BinanceTrader(BaseTrader):
         """Get current market price."""
         self._ensure_initialized()
         
+        # Normalize symbol format (e.g., ETH/USDT.P -> ETHUSDT)
+        normalized_symbol = self._normalize_symbol(symbol)
+        
         try:
-            ticker = self.client.get_symbol_ticker(symbol=symbol)
+            # Use futures API for perpetual contracts
+            ticker = self.client.futures_symbol_ticker(symbol=normalized_symbol)
             return float(ticker['price'])
             
         except BinanceAPIException as e:
-            log.error(f"[{self.account_name}] Failed to get price for {symbol}: {e}")
+            log.error(f"[{self.account_name}] Failed to get price for {normalized_symbol}: {e}")
             raise
     
     async def set_leverage(self, symbol: str, leverage: int) -> bool:
         """Set leverage for a symbol."""
         self._ensure_initialized()
         
+        normalized_symbol = self._normalize_symbol(symbol)
+        
         try:
             self.client.futures_change_leverage(
-                symbol=symbol,
+                symbol=normalized_symbol,
                 leverage=leverage
             )
-            log.info(f"[{self.account_name}] Set leverage for {symbol}: {leverage}x")
+            log.info(f"[{self.account_name}] Set leverage for {normalized_symbol}: {leverage}x")
             return True
             
         except BinanceAPIException as e:
@@ -160,13 +191,15 @@ class BinanceTrader(BaseTrader):
         """Open a long position."""
         self._ensure_initialized()
         
+        normalized_symbol = self._normalize_symbol(symbol)
+        
         try:
             # Set leverage first
             await self.set_leverage(symbol, leverage)
             
             # Build order params
             order_params = {
-                'symbol': symbol,
+                'symbol': normalized_symbol,
                 'side': 'BUY',
                 'type': 'MARKET',
                 'quantity': quantity,
@@ -205,13 +238,15 @@ class BinanceTrader(BaseTrader):
         """Open a short position."""
         self._ensure_initialized()
         
+        normalized_symbol = self._normalize_symbol(symbol)
+        
         try:
             # Set leverage first
             await self.set_leverage(symbol, leverage)
             
             # Build order params
             order_params = {
-                'symbol': symbol,
+                'symbol': normalized_symbol,
                 'side': 'SELL',
                 'type': 'MARKET',
                 'quantity': quantity,
@@ -244,9 +279,11 @@ class BinanceTrader(BaseTrader):
         """Close an existing position."""
         self._ensure_initialized()
         
+        normalized_symbol = self._normalize_symbol(symbol)
+        
         try:
             # Get current position
-            positions = await self.get_positions(symbol)
+            positions = await self.get_positions(normalized_symbol)
             if not positions:
                 return OrderResult(success=False, error="No position found")
             
@@ -257,7 +294,7 @@ class BinanceTrader(BaseTrader):
             close_side = 'SELL' if position.side == 'LONG' else 'BUY'
             
             order = self.client.futures_create_order(
-                symbol=symbol,
+                symbol=normalized_symbol,
                 side=close_side,
                 type='MARKET',
                 quantity=close_qty,
@@ -291,11 +328,13 @@ class BinanceTrader(BaseTrader):
         """Set stop-loss order."""
         self._ensure_initialized()
         
+        normalized_symbol = self._normalize_symbol(symbol)
+        
         try:
             side = 'SELL' if position_side.upper() == 'LONG' else 'BUY'
             
             order = self.client.futures_create_order(
-                symbol=symbol,
+                symbol=normalized_symbol,
                 side=side,
                 type='STOP_MARKET',
                 stopPrice=stop_price,
@@ -328,11 +367,13 @@ class BinanceTrader(BaseTrader):
         """Set take-profit order."""
         self._ensure_initialized()
         
+        normalized_symbol = self._normalize_symbol(symbol)
+        
         try:
             side = 'SELL' if position_side.upper() == 'LONG' else 'BUY'
             
             order = self.client.futures_create_order(
-                symbol=symbol,
+                symbol=normalized_symbol,
                 side=side,
                 type='TAKE_PROFIT_MARKET',
                 stopPrice=take_profit_price,
@@ -360,8 +401,10 @@ class BinanceTrader(BaseTrader):
         """Cancel all open orders for a symbol."""
         self._ensure_initialized()
         
+        normalized_symbol = self._normalize_symbol(symbol)
+        
         try:
-            self.client.futures_cancel_all_open_orders(symbol=symbol)
+            self.client.futures_cancel_all_open_orders(symbol=normalized_symbol)
             log.info(f"[{self.account_name}] Cancelled all orders for {symbol}")
             return True
             
@@ -378,9 +421,12 @@ class BinanceTrader(BaseTrader):
         """Get candlestick data."""
         self._ensure_initialized()
         
+        normalized_symbol = self._normalize_symbol(symbol)
+        
         try:
-            klines = self.client.get_klines(
-                symbol=symbol,
+            # Use futures API for perpetual contracts
+            klines = self.client.futures_klines(
+                symbol=normalized_symbol,
                 interval=interval,
                 limit=limit
             )
@@ -411,15 +457,17 @@ class BinanceTrader(BaseTrader):
         """Get funding rate for a symbol."""
         self._ensure_initialized()
         
+        normalized_symbol = self._normalize_symbol(symbol)
+        
         try:
             # Check cache first
             now = datetime.now().timestamp()
-            if symbol in self._funding_cache:
-                rate, ts = self._funding_cache[symbol]
+            if normalized_symbol in self._funding_cache:
+                rate, ts = self._funding_cache[normalized_symbol]
                 if now - ts < self._cache_duration:
-                    return {'symbol': symbol, 'funding_rate': rate, 'cached': True}
+                    return {'symbol': normalized_symbol, 'funding_rate': rate, 'cached': True}
             
-            funding = self.client.futures_mark_price(symbol=symbol)
+            funding = self.client.futures_mark_price(symbol=normalized_symbol)
             rate = float(funding['lastFundingRate'])
             
             # Update cache
@@ -440,8 +488,10 @@ class BinanceTrader(BaseTrader):
         """Get open interest for a symbol."""
         self._ensure_initialized()
         
+        normalized_symbol = self._normalize_symbol(symbol)
+        
         try:
-            oi = self.client.futures_open_interest(symbol=symbol)
+            oi = self.client.futures_open_interest(symbol=normalized_symbol)
             
             return {
                 'symbol': oi['symbol'],

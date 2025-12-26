@@ -68,6 +68,9 @@ from src.agents.predict_agent import PredictAgent
 from src.server.app import app
 from src.server.state import global_state
 
+# ✅ [新增] 导入 TradingLogger 以便初始化数据库
+from src.monitoring.logger import TradingLogger
+
 class MultiAgentTradingBot:
     """
     多Agent交易机器人（重构版）
@@ -1761,6 +1764,20 @@ def main():
         pass # Command line override to force test? or live? Let's say explicit CLI wins.
         
     print(f"🔧 Startup Mode: {'TEST' if args.test else 'LIVE'} (Env: {env_run_mode})")
+    
+    # ==============================================================================
+    # 🛠️ [修复核心]：强制初始化数据库表结构
+    # 只要实例化 TradingLogger，就会自动执行 _init_database() 创建 PostgreSQL 表
+    # ==============================================================================
+    try:
+        log.info("🛠️ 正在检查/初始化数据库表结构...")
+        # 这一步至关重要：它会连接数据库并运行 CREATE TABLE 语句
+        _db_init = TradingLogger()
+        log.info("✅ 数据库表结构就绪")
+    except Exception as e:
+        log.error(f"❌ 数据库初始化失败 (非致命错误，将继续运行): {e}")
+        # 注意：这里我们捕获异常但不退出，以免影响主程序启动，但请务必关注日志
+    # ==============================================================================
     
     # 测试模式默认 1 分钟周期，实盘模式默认 3 分钟
     if args.test and args.interval == 3.0:  # 如果是测试模式且用户没有指定间隔

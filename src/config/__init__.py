@@ -7,8 +7,8 @@ from pathlib import Path
 from typing import Dict, Any
 from dotenv import load_dotenv
 
-# 加载环境变量
-load_dotenv()
+# 加载环境变量 (使用 override=True 确保 .env 中的设置能覆盖当前进程的环境变量)
+load_dotenv(override=True)
 
 
 class Config:

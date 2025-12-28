@@ -23,6 +23,8 @@ Date: 2025-12-19
 import asyncio
 import sys
 import os
+from dotenv import load_dotenv
+load_dotenv(override=True) # Ensure .env overrides shell environment
 
 # Deployment mode detection: 'local' or 'railway'
 # Railway deployment sets RAILWAY_ENVIRONMENT, use that as detection
@@ -181,6 +183,98 @@ class MultiAgentTradingBot:
         # ✅ 初始化多账户管理器
         self.account_manager = AccountManager()
         self._init_accounts()
+        # Initialize mtime for .env tracking
+        self._env_mtime = 0
+        self._env_path = os.path.join(os.path.dirname(__file__), '.env')
+        
+        # 初始化共享 Agent (与币种无关)
+        print("\n🚀 Initializing agents...")
+        self.data_sync_agent = DataSyncAgent(self.client)
+        self.quant_analyst = QuantAnalystAgent()
+        # self.decision_core = DecisionCoreAgent() # Deprecated in DeepSeek Mode
+        self.risk_audit = RiskAuditAgent(
+            max_leverage=10.0,
+            max_position_pct=0.3,
+            min_stop_loss_pct=0.005,
+            max_stop_loss_pct=0.05
+        )
+        self.processor = MarketDataProcessor()  # ✅ 初始化数据处理器
+        self.feature_engineer = TechnicalFeatureEngineer()  # 🔮 特征工程器 for Prophet
+        # self.regime_detector = RegimeDetector()  # 📊 市场状态检测器 (Integrated into QuantAnalystAgent)
+        
+        # 🔮 为每个币种创建独立的 PredictAgent
+        self.predict_agents = {}
+        for symbol in self.symbols:
+            self.predict_agents[symbol] = PredictAgent(horizon='30m', symbol=symbol)
+        
+        print("  ✅ DataSyncAgent ready")
+        print("  ✅ QuantAnalystAgent ready")
+        print(f"  ✅ PredictAgent ready ({len(self.symbols)} symbols)")
+        print("  ✅ RiskAuditAgent ready")
+        
+        # 🧠 DeepSeek 决策引擎
+        self.strategy_engine = StrategyEngine()
+        if self.strategy_engine.is_ready:
+            print("  ✅ DeepSeek StrategyEngine ready")
+        else:
+            print("  ⚠️ DeepSeek StrategyEngine not ready (Awaiting API Key)")
+            
+        # 🧠 Reflection Agent - 交易反思
+        self.reflection_agent = ReflectionAgent()
+        print("  ✅ ReflectionAgent ready")
+        
+        print(f"\n⚙️  Trading Config:")
+        print(f"  - Symbols: {', '.join(self.symbols)}")
+        print(f"  - Max Position: ${self.max_position_size:.2f} USDT")
+        print(f"  - Leverage: {self.leverage}x")
+        print(f"  - Stop Loss: {self.stop_loss_pct}%")
+        print(f"  - Take Profit: {self.take_profit_pct}%")
+        print(f"  - Test Mode: {'✅ Yes' if self.test_mode else '❌ No'}")
+        
+        # ✅ Load initial trade history (Only in Live Mode)
+        if not self.test_mode:
+            recent_trades = self.saver.get_recent_trades(limit=20)
+            global_state.trade_history = recent_trades
+            print(f"  📜 Loaded {len(recent_trades)} historical trades")
+        else:
+            global_state.trade_history = []
+            print("  🧪 Test mode: No history loaded, showing only current session")
+
+    def _reload_symbols(self):
+        """Reload trading symbols from environment/config without restart"""
+        load_dotenv(override=True)
+        env_symbols = os.environ.get('TRADING_SYMBOLS', '').strip()
+        
+        old_symbols = self.symbols.copy()
+        
+        if env_symbols:
+            self.symbols = [s.strip() for s in env_symbols.split(',') if s.strip()]
+        else:
+            symbols_config = self.config.get('trading.symbols', None)
+            if symbols_config and isinstance(symbols_config, list):
+                self.symbols = symbols_config
+            else:
+                symbol_str = self.config.get('trading.symbol', 'BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT')
+                if ',' in symbol_str:
+                    self.symbols = [s.strip() for s in symbol_str.split(',') if s.strip()]
+                else:
+                    self.symbols = [symbol_str]
+
+        # 🤖 AI500 Dynamic Resolution
+        if 'AI500_TOP10' in self.symbols:
+            self.symbols.remove('AI500_TOP10')
+            ai_top10 = self._resolve_ai500_symbols()
+            self.symbols = list(set(self.symbols + ai_top10))
+            self.symbols.sort()
+            
+        if set(self.symbols) != set(old_symbols):
+            log.info(f"🔄 Trading symbols reloaded: {', '.join(self.symbols)}")
+            # Initialize PredictAgent for any new symbols
+            for symbol in self.symbols:
+                if symbol not in self.predict_agents:
+                    from src.agents.predict_agent import PredictAgent
+                    self.predict_agents[symbol] = PredictAgent(symbol)
+                    log.info(f"🆕 Initialized PredictAgent for {symbol}")
 
     def _resolve_ai500_symbols(self):
         """Dynamic resolution of AI500_TOP10 tag"""
@@ -224,59 +318,6 @@ class MultiAgentTradingBot:
             log.error(f"Failed to resolve AI500 symbols: {e}")
             # Fallback to defaults
             return ["FETUSDT", "RENDERUSDT", "TAOUSDT", "NEARUSDT", "GRTUSDT", "WLDUSDT", "ARKMUSDT", "LPTUSDT", "THETAUSDT", "ROSEUSDT"]
-        
-        # 初始化共享 Agent (与币种无关)
-        print("\n🚀 Initializing agents...")
-        self.data_sync_agent = DataSyncAgent(self.client)
-        self.quant_analyst = QuantAnalystAgent()
-        # self.decision_core = DecisionCoreAgent() # Deprecated in DeepSeek Mode
-        self.risk_audit = RiskAuditAgent(
-            max_leverage=10.0,
-            max_position_pct=0.3,
-            min_stop_loss_pct=0.005,
-            max_stop_loss_pct=0.05
-        )
-        self.processor = MarketDataProcessor()  # ✅ 初始化数据处理器
-        self.feature_engineer = TechnicalFeatureEngineer()  # 🔮 特征工程器 for Prophet
-        # self.regime_detector = RegimeDetector()  # 📊 市场状态检测器 (Integrated into QuantAnalystAgent)
-        
-        # 🔮 为每个币种创建独立的 PredictAgent
-        self.predict_agents = {}
-        for symbol in self.symbols:
-            self.predict_agents[symbol] = PredictAgent(horizon='30m', symbol=symbol)
-        
-        print("  ✅ DataSyncAgent ready")
-        print("  ✅ QuantAnalystAgent ready")
-        print(f"  ✅ PredictAgent ready ({len(self.symbols)} symbols)")
-        print("  ✅ RiskAuditAgent ready")
-        
-        # 🧠 DeepSeek 决策引擎
-        self.strategy_engine = StrategyEngine()
-        if self.strategy_engine.is_ready:
-            print("  ✅ DeepSeek StrategyEngine ready")
-        else:
-            print("  ⚠️ DeepSeek StrategyEngine not ready (Awaiting API Key)")
-        
-        # 🧠 Reflection Agent - 交易反思
-        self.reflection_agent = ReflectionAgent()
-        print("  ✅ ReflectionAgent ready")
-        
-        print(f"\n⚙️  Trading Config:")
-        print(f"  - Symbols: {', '.join(self.symbols)}")
-        print(f"  - Max Position: ${self.max_position_size:.2f} USDT")
-        print(f"  - Leverage: {self.leverage}x")
-        print(f"  - Stop Loss: {self.stop_loss_pct}%")
-        print(f"  - Take Profit: {self.take_profit_pct}%")
-        print(f"  - Test Mode: {'✅ Yes' if self.test_mode else '❌ No'}")
-        
-        # ✅ Load initial trade history (Only in Live Mode)
-        if not self.test_mode:
-            recent_trades = self.saver.get_recent_trades(limit=20)
-            global_state.trade_history = recent_trades
-            print(f"  📜 Loaded {len(recent_trades)} historical trades")
-        else:
-            global_state.trade_history = []
-            print("  🧪 Test mode: No history loaded, showing only current session")
     
     def _init_accounts(self):
         """
@@ -521,6 +562,7 @@ class MultiAgentTradingBot:
             
             # 🆕 Get Funding Rate for crowding detection
             funding_rate = sentiment.get('details', {}).get('funding_rate', 0)
+            if funding_rate is None: funding_rate = 0
             
             # 🆕 Get ADX from RegimeDetector for trend strength validation
             from src.agents.regime_detector import RegimeDetector
@@ -569,6 +611,7 @@ class MultiAgentTradingBot:
             
             # Extract OI change and store immediately
             oi_change = oi_fuel.get('oi_change_24h', 0)
+            if oi_change is None: oi_change = 0
             four_layer_result['oi_change'] = oi_change
             
             # 🆕 DATA SANITY CHECKS - Flag statistically impossible values
@@ -2090,7 +2133,17 @@ class MultiAgentTradingBot:
         
         try:
             while global_state.is_running:
-                # Check stop state FIRST - must break before continue
+                # 🔄 Check for configuration changes
+                try:
+                    current_mtime = os.path.getmtime(self._env_path)
+                    if current_mtime > self._env_mtime:
+                        if self._env_mtime > 0: # Avoid reload on first pass as it's already loaded
+                            log.info("📝 .env file change detected, reloading symbols...")
+                            self._reload_symbols()
+                        self._env_mtime = current_mtime
+                except Exception as e:
+                    log.error(f"Error checking .env mtime: {e}")
+
                 # Check stop state FIRST - must break before continue
                 if global_state.execution_mode == 'Stopped':
                     # Fix: Do not break, just wait.

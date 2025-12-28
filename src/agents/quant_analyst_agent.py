@@ -202,7 +202,7 @@ class QuantAnalystAgent:
         if oi_is_anomaly:
             # Mark fuel as invalid due to data anomaly
             oi_fuel = {
-                'oi_change_24h': None,
+                'oi_change_24h': 0,  # Fallback to 0 instead of None to avoid downstream abs() errors
                 'fuel_signal': 'DATA_ANOMALY',
                 'fuel_score': 0,
                 'whale_trap_risk': False,

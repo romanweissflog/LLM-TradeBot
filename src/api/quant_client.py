@@ -12,14 +12,17 @@ class QuantClient:
     """外部量化 API 客户端"""
     
     BASE_URL = "http://nofxaios.com:30006/api/coin"
-    # Security fix: Load AUTH_TOKEN from environment variable
-    AUTH_TOKEN = os.getenv('QUANT_AUTH_TOKEN', '')
+    @property
+    def auth_token(self) -> str:
+        """从环境变量动态获取最新的认证令牌"""
+        token = os.getenv('QUANT_AUTH_TOKEN', '')
+        if not token:
+            log.warning("QUANT_AUTH_TOKEN not set in environment, quant API calls may fail")
+        return token
     
     def __init__(self, timeout: int = 10):
         self.timeout = aiohttp.ClientTimeout(total=timeout)
         self.session: Optional[aiohttp.ClientSession] = None
-        if not self.AUTH_TOKEN:
-            log.warning("QUANT_AUTH_TOKEN not set in environment, quant API calls may fail")
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """获取或创建 aiohttp session，正确处理 event loop 变化"""
@@ -53,7 +56,7 @@ class QuantClient:
         获取指定币种的量化深度数据
         """
         clean_symbol = symbol.replace("USDT", "USDT") # 兼容性处理
-        url = f"{self.BASE_URL}/{clean_symbol}?include=netflow,oi,price&auth={self.AUTH_TOKEN}"
+        url = f"{self.BASE_URL}/{clean_symbol}?include=netflow,oi,price&auth={self.auth_token}"
         
         try:
             session = await self._get_session()
@@ -75,7 +78,7 @@ class QuantClient:
         """
         获取 AI500 优质币池列表
         """
-        url = f"http://nofxaios.com:30006/api/ai500/list?auth={self.AUTH_TOKEN}"
+        url = f"http://nofxaios.com:30006/api/ai500/list?auth={self.auth_token}"
         
         try:
             session = await self._get_session()
@@ -100,7 +103,7 @@ class QuantClient:
             duration: 时间周期 (1h, 4h, 24h)
         """
         endpoint = "top-ranking" if ranking_type == 'top' else "low-ranking"
-        url = f"http://nofxaios.com:30006/api/oi/{endpoint}?limit={limit}&duration={duration}&auth={self.AUTH_TOKEN}"
+        url = f"http://nofxaios.com:30006/api/oi/{endpoint}?limit={limit}&duration={duration}&auth={self.auth_token}"
         
         try:
             session = await self._get_session()

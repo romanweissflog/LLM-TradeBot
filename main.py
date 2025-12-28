@@ -143,7 +143,7 @@ class MultiAgentTradingBot:
                 self.symbols = symbols_config
             else:
                 # 向后兼容: 使用旧版 trading.symbol 配置 (支持 CSV 字符串 "BTCUSDT,ETHUSDT")
-                symbol_str = self.config.get('trading.symbol', 'BTCUSDT')
+                symbol_str = self.config.get('trading.symbol', 'BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT')  # ✅ 默认4个币种
                 if ',' in symbol_str:
                     self.symbols = [s.strip() for s in symbol_str.split(',') if s.strip()]
                 else:

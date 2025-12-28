@@ -99,10 +99,10 @@ class DataSyncAgent:
                 log.warning(f"WebSocket 启动失败，回退到 REST API: {e}")
                 self.use_websocket = False
         else:
-            log.info("📡 使用 REST API 模式（WebSocket 已禁用）")
+            log.info("📡 Using REST API mode (WebSocket disabled)")
         
         self.last_snapshot = None
-        log.info("🕵️ 数据先知 (The Oracle) 初始化完成")
+        log.info("🕵️ The Oracle (DataSync Agent) initialized")
     
     async def fetch_all_timeframes(
         self,
@@ -187,7 +187,7 @@ class DataSyncAgent:
             # 标记首次加载完成
             if not self._initial_load_complete:
                 self._initial_load_complete = True
-                log.info("✅ 初始数据加载完成，后续将使用 WebSocket 缓存")
+                log.info("✅ Initial data loaded, will use WebSocket cache for updates")
         
         fetch_duration = (datetime.now() - start_time).total_seconds()
         # log.oracle(f"✅ 数据获取完成，耗时: {fetch_duration:.2f}秒")

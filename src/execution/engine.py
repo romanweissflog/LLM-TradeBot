@@ -18,7 +18,7 @@ class ExecutionEngine:
         self.client = binance_client
         self.risk_manager = risk_manager
         
-        log.info("🚀 执行指挥官 (The Executor) 初始化完成")
+        log.info("🚀 The Executor (Execution Engine) initialized")
     
     def execute_decision(
         self,

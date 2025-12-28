@@ -22,7 +22,7 @@ class RiskManager:
         self.consecutive_losses = 0
         self.total_drawdown_pct = 0
         
-        log.info("风险管理器初始化完成")
+        log.info("Risk Manager initialized")
     
     def validate_format(self, decision: Dict, raw_response: str = "") -> Tuple[bool, str]:
         """

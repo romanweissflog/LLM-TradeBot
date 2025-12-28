@@ -33,7 +33,7 @@ class QuantAnalystAgent:
     
     def __init__(self):
         """初始化量化策略师"""
-        log.info("👨‍🔬 量化策略师 (The Strategist) 初始化完成 - 简化模式")
+        log.info("👨‍🔬 The Strategist (QuantAnalyst Agent) initialized - Simplified mode")
     
     async def analyze_all_timeframes(self, snapshot: MarketSnapshot) -> Dict:
         """

@@ -24,7 +24,7 @@ try:
     HAS_LIGHTGBM = True
 except (ImportError, OSError):
     HAS_LIGHTGBM = False
-    log.warning("LightGBM 未安装，将使用规则评分模式")
+    log.warning("LightGBM not installed, will use rule-based scoring mode")
 
 
 class ProphetMLModel:
@@ -117,7 +117,7 @@ class ProphetMLModel:
             训练指标字典
         """
         if not HAS_LIGHTGBM:
-            raise ImportError("LightGBM 未安装，请运行: pip install lightgbm")
+            raise ImportError("LightGBM not installed, please run: pip install lightgbm")
         
         # 使用默认参数或自定义参数
         model_params = {**self.DEFAULT_PARAMS, **(params or {})}

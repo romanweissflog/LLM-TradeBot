@@ -35,7 +35,7 @@ class BinanceClient:
         self._funding_cache = {} # {symbol: (rate, timestamp)}
         self._cache_duration = 3600 # 1小时缓存
         
-        log.info(f"Binance客户端初始化完成 (测试网: {self.testnet})")
+        log.info(f"Binance client initialized (testnet: {self.testnet})")
     
     def get_klines(self, symbol: str, interval: str, limit: int = 500) -> List[Dict]:
         """
@@ -83,7 +83,7 @@ class BinanceClient:
             return formatted_klines
             
         except BinanceAPIException as e:
-            log.error(f"获取K线数据失败: {e}")
+            log.error(f"Failed to get klines: {e}")
             raise
     
     def get_ticker_price(self, symbol: str) -> Dict:
@@ -96,7 +96,7 @@ class BinanceClient:
                 'timestamp': datetime.now().timestamp() * 1000
             }
         except BinanceAPIException as e:
-            log.error(f"获取价格失败: {e}")
+            log.error(f"Failed to get price: {e}")
             raise
     
     def get_orderbook(self, symbol: str, limit: int = 20) -> Dict:
@@ -109,7 +109,7 @@ class BinanceClient:
                 'asks': [[float(p), float(q)] for p, q in depth['asks']]
             }
         except BinanceAPIException as e:
-            log.error(f"获取订单簿失败: {e}")
+            log.error(f"Failed to get order book: {e}")
             raise
     
     def get_account_info(self) -> Dict:
@@ -131,7 +131,7 @@ class BinanceClient:
                 'usdt_balance': usdt_balance
             }
         except BinanceAPIException as e:
-            log.error(f"获取账户信息失败: {e}")
+            log.error(f"Failed to get account info: {e}")
             raise
     
     def get_futures_account(self) -> Dict:
@@ -149,7 +149,7 @@ class BinanceClient:
                 'positions': account['positions']
             }
         except BinanceAPIException as e:
-            log.error(f"获取合约账户失败: {e}")
+            log.error(f"Failed to get futures account: {e}")
             raise
     
     def get_futures_position(self, symbol: str) -> Optional[Dict]:
@@ -174,7 +174,7 @@ class BinanceClient:
                 'position_side': pos['positionSide']
             }
         except BinanceAPIException as e:
-            log.error(f"获取持仓信息失败: {e}")
+            log.error(f"Failed to get positions: {e}")
             raise
     
     def get_account_balance(self) -> float:
@@ -188,7 +188,7 @@ class BinanceClient:
             account = self.get_futures_account()
             return account['available_balance']
         except BinanceAPIException as e:
-            log.error(f"获取账户余额失败: {e}")
+            log.error(f"Failed to get account balance: {e}")
             raise
     
     def get_funding_rate(self, symbol: str) -> Dict:
@@ -203,7 +203,7 @@ class BinanceClient:
                 'funding_time': funding['nextFundingTime']
             }
         except BinanceAPIException as e:
-            log.error(f"获取资金费率失败: {e}")
+            log.error(f"Failed to get funding rate: {e}")
             raise
 
     def get_funding_rate_with_cache(self, symbol: str) -> Dict:
@@ -228,7 +228,7 @@ class BinanceClient:
             data['is_cached'] = False
             return data
         except Exception as e:
-            log.error(f"刷新资金费率缓存失败: {e}")
+            log.error(f"Failed to refresh funding rate cache: {e}")
             # 如果有旧缓存，勉强返回
             if symbol in self._funding_cache:
                 return {'symbol': symbol, 'funding_rate': self._funding_cache[symbol][0], 'is_cached': True, 'error': 'refresh_failed'}
@@ -244,7 +244,7 @@ class BinanceClient:
                 'timestamp': oi['time']
             }
         except BinanceAPIException as e:
-            log.error(f"获取持仓量失败: {e}")
+            log.error(f"Failed to get open interest: {e}")
             raise
     
     def place_market_order(
@@ -281,11 +281,11 @@ class BinanceClient:
             
             order = self.client.futures_create_order(**order_params)
             
-            log.info(f"市价单已下: {side} {quantity} {symbol} (positionSide={position_side})")
+            log.info(f"Market order placed: {side} {quantity} {symbol} (positionSide={position_side})")
             return order
             
         except BinanceAPIException as e:
-            log.error(f"下单失败: {e}")
+            log.error(f"Order failed: {e}")
             raise
     
     def place_limit_order(
@@ -307,11 +307,11 @@ class BinanceClient:
                 timeInForce=time_in_force
             )
             
-            log.info(f"限价单已下: {side} {quantity} {symbol} @ {price}")
+            log.info(f"Limit order placed: {side} {quantity} {symbol} @ {price}")
             return order
             
         except BinanceAPIException as e:
-            log.error(f"下单失败: {e}")
+            log.error(f"Order failed: {e}")
             raise
     
     def set_stop_loss_take_profit(
@@ -336,7 +336,7 @@ class BinanceClient:
             # 获取当前持仓
             position = self.get_futures_position(symbol)
             if not position or position['position_amt'] == 0:
-                log.warning("无持仓，无法设置止损止盈")
+                log.warning("No position, cannot set SL/TP")
                 return orders
             
             position_amt = abs(position['position_amt'])
@@ -353,7 +353,7 @@ class BinanceClient:
                     positionSide=position_side  # 添加持仓方向
                 )
                 orders.append(sl_order)
-                log.info(f"止损单已设置: {stop_loss_price} (positionSide={position_side})")
+                log.info(f"Stop loss set: {stop_loss_price} (positionSide={position_side})")
             
             # 止盈单
             if take_profit_price:
@@ -366,22 +366,22 @@ class BinanceClient:
                     positionSide=position_side  # 添加持仓方向
                 )
                 orders.append(tp_order)
-                log.info(f"止盈单已设置: {take_profit_price} (positionSide={position_side})")
+                log.info(f"Take profit set: {take_profit_price} (positionSide={position_side})")
             
             return orders
             
         except BinanceAPIException as e:
-            log.error(f"设置止损止盈失败: {e}")
+            log.error(f"Failed to set SL/TP: {e}")
             raise
     
     def cancel_all_orders(self, symbol: str) -> Dict:
         """取消所有订单"""
         try:
             result = self.client.futures_cancel_all_open_orders(symbol=symbol)
-            log.info(f"已取消所有{symbol}订单")
+            log.info(f"Cancelled all {symbol} orders")
             return result
         except BinanceAPIException as e:
-            log.error(f"取消订单失败: {e}")
+            log.error(f"Failed to cancel orders: {e}")
             raise
     
     def get_market_data_snapshot(self, symbol: str) -> Dict:
@@ -407,7 +407,7 @@ class BinanceClient:
                 position = self.get_futures_position(symbol)
             except Exception as e:
                 account_error = str(e)
-                log.warning(f"获取账户/持仓信息失败（可能未配置有效API密钥）: {e}")
+                log.warning(f"Failed to get account/position info (API key may not be configured): {e}")
             
             return {
                 'timestamp': datetime.now().isoformat(),
@@ -422,7 +422,7 @@ class BinanceClient:
             }
             
         except Exception as e:
-            log.error(f"获取市场快照失败: {e}")
+            log.error(f"Failed to get market snapshot: {e}")
             raise
     
     def get_symbol_info(self, symbol: str) -> Dict:
@@ -431,7 +431,7 @@ class BinanceClient:
             info = self.client.get_symbol_info(symbol)
             return info or {}
         except BinanceAPIException as e:
-            log.error(f"获取交易对信息失败: {e}")
+            log.error(f"Failed to get symbol info: {e}")
             raise
     
     def get_symbol_min_notional(self, symbol: str) -> float:
@@ -474,5 +474,5 @@ class BinanceClient:
 
             return 0.0
         except Exception as e:
-            log.warning(f"解析最小名义失败，返回0: {e}")
+            log.warning(f"Failed to parse min notional, returning 0: {e}")
             return 0.0

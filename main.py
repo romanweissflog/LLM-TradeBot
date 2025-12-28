@@ -121,7 +121,7 @@ class MultiAgentTradingBot:
             test_mode: 测试模式（不执行真实交易）
         """
         print("\n" + "="*80)
-        print(f"🤖 AI Trader - DeepSeek LLM 决策模式")
+        print(f"🤖 AI Trader - DeepSeek LLM Decision Mode")
         print("="*80)
         
         self.config = Config()
@@ -173,7 +173,7 @@ class MultiAgentTradingBot:
         self._init_accounts()
         
         # 初始化共享 Agent (与币种无关)
-        print("\n🚀 初始化Agent...")
+        print("\n🚀 Initializing agents...")
         self.data_sync_agent = DataSyncAgent(self.client)
         self.quant_analyst = QuantAnalystAgent()
         # self.decision_core = DecisionCoreAgent() # Deprecated in DeepSeek Mode
@@ -192,38 +192,38 @@ class MultiAgentTradingBot:
         for symbol in self.symbols:
             self.predict_agents[symbol] = PredictAgent(horizon='30m', symbol=symbol)
         
-        print("  ✅ DataSyncAgent 已就绪")
-        print("  ✅ QuantAnalystAgent 已就绪")
-        print(f"  ✅ PredictAgent 已就绪 (共 {len(self.symbols)} 个币种)")
-        print("  ✅ RiskAuditAgent 已就绪")
+        print("  ✅ DataSyncAgent ready")
+        print("  ✅ QuantAnalystAgent ready")
+        print(f"  ✅ PredictAgent ready ({len(self.symbols)} symbols)")
+        print("  ✅ RiskAuditAgent ready")
         
         # 🧠 DeepSeek 决策引擎
         self.strategy_engine = StrategyEngine()
         if self.strategy_engine.is_ready:
-            print("  ✅ DeepSeek StrategyEngine 已就绪")
+            print("  ✅ DeepSeek StrategyEngine ready")
         else:
-            print("  ⚠️ DeepSeek StrategyEngine 未就绪 (等待 API Key 配置)")
+            print("  ⚠️ DeepSeek StrategyEngine not ready (Awaiting API Key)")
         
         # 🧠 Reflection Agent - 交易反思
         self.reflection_agent = ReflectionAgent()
-        print("  ✅ ReflectionAgent 已就绪")
+        print("  ✅ ReflectionAgent ready")
         
-        print(f"\n⚙️  交易配置:")
-        print(f"  - 交易对: {', '.join(self.symbols)}")
-        print(f"  - 最大单笔: ${self.max_position_size:.2f} USDT")
-        print(f"  - 杠杆倍数: {self.leverage}x")
-        print(f"  - 止损: {self.stop_loss_pct}%")
-        print(f"  - 止盈: {self.take_profit_pct}%")
-        print(f"  - 测试模式: {'✅ 是' if self.test_mode else '❌ 否'}")
+        print(f"\n⚙️  Trading Config:")
+        print(f"  - Symbols: {', '.join(self.symbols)}")
+        print(f"  - Max Position: ${self.max_position_size:.2f} USDT")
+        print(f"  - Leverage: {self.leverage}x")
+        print(f"  - Stop Loss: {self.stop_loss_pct}%")
+        print(f"  - Take Profit: {self.take_profit_pct}%")
+        print(f"  - Test Mode: {'✅ Yes' if self.test_mode else '❌ No'}")
         
         # ✅ Load initial trade history (Only in Live Mode)
         if not self.test_mode:
             recent_trades = self.saver.get_recent_trades(limit=20)
             global_state.trade_history = recent_trades
-            print(f"  📜 已加载 {len(recent_trades)} 条历史交易记录")
+            print(f"  📜 Loaded {len(recent_trades)} historical trades")
         else:
             global_state.trade_history = []
-            print("  🧪 测试模式：不加载历史记录，仅显示本次运行数据")
+            print("  🧪 Test mode: No history loaded, showing only current session")
     
     def _init_accounts(self):
         """
@@ -268,7 +268,7 @@ class MultiAgentTradingBot:
         # Log summary
         accounts = self.account_manager.list_accounts(enabled_only=True)
         if accounts:
-            print(f"  📊 已加载 {len(accounts)} 个交易账户:")
+            print(f"  📊 Loaded {len(accounts)} trading accounts:")
             for acc in accounts:
                 print(f"     - {acc.account_name} ({acc.exchange_type.value}, testnet={acc.testnet})")
     
@@ -305,13 +305,13 @@ class MultiAgentTradingBot:
             cycle_id = global_state.current_cycle_id
             
             # 每个币种的子日志
-            global_state.add_log(f"📊 [{self.current_symbol}] Starting analysis...")
+            global_state.add_log(f"[📊 SYSTEM] {self.current_symbol} analysis started")
             
             # ✅ Generate snapshot_id for this cycle (legacy compatibility)
             snapshot_id = f"snap_{int(time.time())}"
 
             # Step 1: 采样 - 数据先知 (The Oracle)
-            print("\n[Step 1/4] 🕵️ 数据先知 (The Oracle) - 异步数据采集...")
+            print("\n[Step 1/4] 🕵️ The Oracle (Data Agent) - Fetching data...")
             global_state.oracle_status = "Fetching Data..." 
             market_snapshot = await self.data_sync_agent.fetch_all_timeframes(self.current_symbol)
             global_state.oracle_status = "Data Ready"
@@ -418,14 +418,14 @@ class MultiAgentTradingBot:
             market_snapshot.stable_1h = processed_dfs['1h']
             
             current_price = market_snapshot.live_5m.get('close')
-            print(f"  ✅ 采样完毕: ${current_price:,.2f} ({market_snapshot.timestamp.strftime('%H:%M:%S')})")
+            print(f"  ✅ Data ready: ${current_price:,.2f} ({market_snapshot.timestamp.strftime('%H:%M:%S')})")
             
             # LOG 1: Oracle
-            global_state.add_log(f"🕵️ DataSyncAgent (The Oracle): Fetch complete. Snapshot=${current_price:,.2f}")
+            global_state.add_log(f"[🕵️ ORACLE] Data ready: ${current_price:,.2f}")
             global_state.current_price = current_price
             
             # Step 2: Strategist
-            print("[Step 2/4] 👨‍🔬 量化策略师 (The Strategist) - 评估数据中...")
+            print("[Step 2/4] 👨‍🔬 The Strategist (QuantAnalyst) - Analyzing data...")
             quant_analysis = await self.quant_analyst.analyze_all_timeframes(market_snapshot)
             
             # Save Context
@@ -435,10 +435,10 @@ class MultiAgentTradingBot:
             trend_score = quant_analysis.get('trend', {}).get('total_trend_score', 0)
             osc_score = quant_analysis.get('oscillator', {}).get('total_osc_score', 0)
             sent_score = quant_analysis.get('sentiment', {}).get('total_sentiment_score', 0)
-            global_state.add_log(f"👨‍🔬 QuantAnalystAgent (The Strategist): Trend={trend_score:+.0f} | Osc={osc_score:+.0f} | Sent={sent_score:+.0f}")
+            global_state.add_log(f"[👨‍🔬 STRATEGIST] Trend={trend_score:+.0f} | Osc={osc_score:+.0f} | Sent={sent_score:+.0f}")
             
             # Step 2.5: Prophet
-            print("[Step 2.5/5] 🔮 预测预言家 (The Prophet) - 计算上涨概率...")
+            print("[Step 2.5/5] 🔮 The Prophet (Predict Agent) - Calculating probability...")
             df_15m_features = self.feature_engineer.build_features(processed_dfs['15m'])
             if not df_15m_features.empty:
                 latest = df_15m_features.iloc[-1].to_dict()
@@ -452,7 +452,7 @@ class MultiAgentTradingBot:
             # LOG 3: Prophet (The Prophet)
             p_up_pct = predict_result.probability_up * 100
             direction = "↗UP" if predict_result.probability_up > 0.55 else ("↘DN" if predict_result.probability_up < 0.45 else "➖NEU")
-            global_state.add_log(f"🔮 PredictAgent (The Prophet): P(Up)={p_up_pct:.1f}% {direction}")
+            global_state.add_log(f"[🔮 PROPHET] P(Up)={p_up_pct:.1f}% {direction}")
             
             # Save Prediction
             self.saver.save_prediction(asdict(predict_result), self.current_symbol, snapshot_id, cycle_id=cycle_id)
@@ -704,11 +704,11 @@ class MultiAgentTradingBot:
                             if sentiment_score > 80:  # Extreme Greed
                                 four_layer_result['tp_multiplier'] = 0.5  # 止盈减半
                                 four_layer_result['sl_multiplier'] = 1.0  # 止损不变
-                                log.warning(f"🔴 Extreme Greed ({sentiment_score:.0f}): TP目标减半")
+                                log.warning(f"🔴 Extreme Greed ({sentiment_score:.0f}): TP target halved")
                             elif sentiment_score < -80:  # Extreme Fear
                                 four_layer_result['tp_multiplier'] = 1.5  # 可加大TP
                                 four_layer_result['sl_multiplier'] = 0.8  # 缩小SL
-                                log.info(f"🟢 Extreme Fear ({sentiment_score:.0f}): 贪婪时恐惧模式")
+                                log.info(f"🟢 Extreme Fear ({sentiment_score:.0f}): Be greedy when others are fearful")
                             else:
                                 four_layer_result['tp_multiplier'] = 1.0
                                 four_layer_result['sl_multiplier'] = 1.0
@@ -787,7 +787,8 @@ class MultiAgentTradingBot:
                     'trigger': trigger_analysis
                 }
                 
-                log.info(f"✅ Multi-Agent analysis completed: Trend={len(trend_analysis)}chars, Setup={len(setup_analysis)}chars, Trigger={len(trigger_analysis)}chars")
+                # Log summary via global_state for dashboard
+                global_state.add_log(f"[⚖️ CRITIC] 4-Layer Analysis: Trend={len(trend_analysis)>100 and '✓' or '○'} | Setup={len(setup_analysis)>100 and '✓' or '○'} | Trigger={len(trigger_analysis)>100 and '✓' or '○'}")
                 
             except Exception as e:
                 log.error(f"❌ Multi-Agent analysis failed: {e}")
@@ -806,7 +807,7 @@ class MultiAgentTradingBot:
             }
             regime_info = quant_analysis.get('regime', {})
             
-            print("[Step 3/5] 🧠 DeepSeek LLM - 智能决策中...")
+            print("[Step 3/5] 🧠 DeepSeek LLM - Making decision...")
             
             # Build Context with POSITION INFO
             market_context_text = self._build_market_context(
@@ -959,11 +960,11 @@ class MultiAgentTradingBot:
             bear_stance = llm_decision.get('bear_perspective', {}).get('stance', 'UNKNOWN')
             bull_reasons = llm_decision.get('bull_perspective', {}).get('bullish_reasons', '')[:120]
             bear_reasons = llm_decision.get('bear_perspective', {}).get('bearish_reasons', '')[:120]
-            global_state.add_log(f"🐂 Bull Agent: [{bull_stance}] Conf={bull_conf}% | {bull_reasons}...")
-            global_state.add_log(f"🐻 Bear Agent: [{bear_stance}] Conf={bear_conf}% | {bear_reasons}...")
+            global_state.add_log(f"[🐂 BULL] [{bull_stance}] Conf={bull_conf}%")
+            global_state.add_log(f"[🐻 BEAR] [{bear_stance}] Conf={bear_conf}%")
             
             # LOG: LLM Decision Engine (generic, not tied to DeepSeek)
-            global_state.add_log(f"🧠 LLM Decision Engine: Action={vote_result.action.upper()} | Conf={llm_decision.get('confidence', 0)}% | {llm_decision.get('reasoning', '')[:50]}")
+            global_state.add_log(f"[⚖️ CRITIC] Action={vote_result.action.upper()} | Conf={llm_decision.get('confidence', 0)}%")
             
             # ✅ Decision Recording moved after Risk Audit for complete context
             # Saved to file still happens here for "raw" decision
@@ -1028,11 +1029,11 @@ class MultiAgentTradingBot:
                 }
             
             # Step 4: 审计 - 风控守护者 (The Guardian)
-            print(f"[Step 4/5] 👮 风控守护者 (The Guardian) - 进行终审...")
+            print(f"[Step 4/5] 👮 The Guardian (Risk Audit) - Final review...")
             
             # Critic Log for Action decision
             # Step 4: 审计 - 风控守护者 (The Guardian)
-            print(f"[Step 4/5] 👮 风控守护者 (The Guardian) - 进行终审...")
+            print(f"[Step 4/5] 👮 The Guardian (Risk Audit) - Final review...")
             
             # LOG 3: Critic (Action Case) - if not already logged (Wait case returns early)
             regime_txt = vote_result.regime.get('regime', 'Unknown') if vote_result.regime else 'Unknown'
@@ -1115,10 +1116,9 @@ class MultiAgentTradingBot:
             
             # LOG 4: Guardian (Single Line)
             if not audit_result.passed:
-                 global_state.add_log(f"🛡️ RiskAuditAgent (The Guardian): Result: ❌ BLOCKED ({audit_result.blocked_reason})")
+                 global_state.add_log(f"[🛡️ GUARDIAN] ❌ BLOCKED ({audit_result.blocked_reason})")
             else:
-                 warn_txt = f" | Corrections: {audit_result.corrections}" if audit_result.corrections else ""
-                 global_state.add_log(f"🛡️ RiskAuditAgent (The Guardian): Result: ✅ PASSED (Risk: {audit_result.risk_level.value}){warn_txt}")
+                 global_state.add_log(f"[🛡️ GUARDIAN] ✅ PASSED (Risk: {audit_result.risk_level.value})")
             
             # ✅ Update Global State with FULL Decision info (Vote + Audit)
             decision_dict = asdict(vote_result)
@@ -1201,7 +1201,7 @@ class MultiAgentTradingBot:
                 print(f"  模拟订单: {order_params['action']} {order_params['quantity']} @ {current_price}")
                 
                 # LOG 5: Executor (Test)
-                global_state.add_log(f"🚀 ExecutionEngine (The Executor): Mode=Test => Command: {order_params['action'].upper()} {order_params['quantity']} @ {current_price:.2f}")
+                global_state.add_log(f"[🚀 EXECUTOR] Test: {order_params['action'].upper()} {order_params['quantity']} @ {current_price:.2f}")
 
                  # ✅ Save Execution (Simulated)
                 self.saver.save_execution({
@@ -1324,7 +1324,7 @@ class MultiAgentTradingBot:
                 # 🎯 递增周期开仓计数器
                 if 'open' in vote_result.action.lower():
                      global_state.cycle_positions_opened += 1
-                     log.info(f"本周期已开仓: {global_state.cycle_positions_opened}/1")
+                     log.info(f"Positions opened this cycle: {global_state.cycle_positions_opened}/1")
                 
                 return {
                     'status': 'success',
@@ -1344,7 +1344,7 @@ class MultiAgentTradingBot:
                     status_txt = "SENT" if is_success else "FAILED"
                     
                     # LOG 5: Executor (Live)
-                    global_state.add_log(f"🚀 ExecutionEngine (The Executor): Mode=Live | Command={order_params['action'].upper()} {order_params['quantity']} => Result: {status_icon} {status_txt}")
+                    global_state.add_log(f"[🚀 EXECUTOR] Live: {order_params['action'].upper()} {order_params['quantity']} => {status_icon} {status_txt}")
                         
                     executed = {'status': 'filled' if is_success else 'failed', 'avgPrice': current_price, 'executedQty': order_params['quantity']}
                         
@@ -1477,7 +1477,7 @@ class MultiAgentTradingBot:
                 }
         
         except Exception as e:
-            log.error(f"计交易循环异常: {e}", exc_info=True)
+            log.error(f"Trading cycle exception: {e}", exc_info=True)
             global_state.add_log(f"Error: {e}")
             return {
                 'status': 'error',
@@ -1531,7 +1531,7 @@ class MultiAgentTradingBot:
         try:
             return self.client.get_account_balance()
         except Exception as e:
-            log.error(f"获取余额失败: {e}")
+            log.error(f"Failed to get balance: {e}")
             return 0.0
     
     def _get_current_position(self) -> Optional[PositionInfo]:
@@ -1562,7 +1562,7 @@ class MultiAgentTradingBot:
                 )
             return None
         except Exception as e:
-            log.error(f"获取持仓失败: {e}")
+            log.error(f"Failed to get positions: {e}")
             return None
     
     def _execute_order(self, order_params: Dict) -> bool:
@@ -1604,7 +1604,7 @@ class MultiAgentTradingBot:
             return True
             
         except Exception as e:
-            log.error(f"订单执行失败: {e}", exc_info=True)
+            log.error(f"Order execution failed: {e}", exc_info=True)
             return False
     
     
@@ -1938,7 +1938,7 @@ class MultiAgentTradingBot:
         Args:
             interval_minutes: 运行间隔（分钟）
         """
-        log.info(f"🚀 启动持续运行模式 (间隔: {interval_minutes}分钟)")
+        log.info(f"🚀 Starting continuous mode (interval: {interval_minutes}min)")
         global_state.is_running = True
         
         # Logger is configured in src.utils.logger, no need to override here.
@@ -1964,7 +1964,7 @@ class MultiAgentTradingBot:
         # 设置初始间隔 (优先使用 CLI 参数，后续 API 可覆盖)
         global_state.cycle_interval = interval_minutes
         
-        log.info(f"🚀 启动持续交易模式 (间隔: {global_state.cycle_interval}m)")
+        log.info(f"🚀 Starting continuous trading mode (interval: {global_state.cycle_interval}m)")
         
         # 🧪 Test Mode: Initialize Virtual Account for Chart
         if self.test_mode:
@@ -1983,7 +1983,7 @@ class MultiAgentTradingBot:
                 if global_state.execution_mode == 'Stopped':
                     # Fix: Do not break, just wait.
                     if not hasattr(self, '_stop_logged') or not self._stop_logged:
-                        print("\n⏹️ 系统已停止 (等待启动)")
+                        print("\n⏹️ System stopped (waiting for start)")
                         global_state.add_log("⏹️ System STOPPED - Waiting for Start...")
                         self._stop_logged = True
                     time.sleep(1)
@@ -1995,7 +1995,7 @@ class MultiAgentTradingBot:
                 if global_state.execution_mode == 'Paused':
                     # 首次进入暂停时打印日志
                     if not hasattr(self, '_pause_logged') or not self._pause_logged:
-                        print("\n⏸️ 系统已暂停，等待恢复...")
+                        print("\n⏸️ System paused, waiting to resume...")
                         global_state.add_log("⏸️ System PAUSED - waiting for resume...")
                         self._pause_logged = True
                     time.sleep(1)
@@ -2023,7 +2023,7 @@ class MultiAgentTradingBot:
                 print(f"🔄 Cycle #{cycle_num} | 分析 {len(self.symbols)} 个交易对")
                 print(f"{'='*80}")
                 global_state.add_log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                global_state.add_log(f"🔄 Cycle #{cycle_num} started | Symbols: {', '.join(self.symbols)}")
+                global_state.add_log(f"[📊 SYSTEM] Cycle #{cycle_num} | {', '.join(self.symbols)}")
 
                 # 🎯 重置周期开仓计数器
                 global_state.cycle_positions_opened = 0
@@ -2058,7 +2058,7 @@ class MultiAgentTradingBot:
                     best_decision = all_decisions[0]
                     
                     print(f"\n🎯 本周期最优开仓机会: {best_decision['symbol']} (信心度: {best_decision['confidence']:.1f}%)")
-                    global_state.add_log(f"🎯 Best opportunity this cycle: {best_decision['symbol']} (Confidence: {best_decision['confidence']:.1f}%)")
+                    global_state.add_log(f"[🎯 SYSTEM] Best: {best_decision['symbol']} (Conf: {best_decision['confidence']:.1f}%)")
                     
                     # 只执行最优的一个
                     # 注意：实际执行已经在 run_trading_cycle 中完成了
@@ -2103,7 +2103,7 @@ class MultiAgentTradingBot:
                         remaining = int((wait_seconds - elapsed_seconds) / 60)
                         if remaining > 0:
                              print(f"⏳ Next cycle in {remaining}m...")
-                             global_state.add_log(f"⏳ Waiting next cycle... ({remaining}m)")
+                             global_state.add_log(f"[📊 SYSTEM] Waiting next cycle... ({remaining}m)")
 
                     time.sleep(1)
                     elapsed_seconds += 1
@@ -2200,12 +2200,12 @@ def main():
     # 只要实例化 TradingLogger，就会自动执行 _init_database() 创建 PostgreSQL 表
     # ==============================================================================
     try:
-        log.info("🛠️ 正在检查/初始化数据库表结构...")
+        log.info("🛠️ Checking/initializing database tables...")
         # 这一步至关重要：它会连接数据库并运行 CREATE TABLE 语句
         _db_init = TradingLogger()
-        log.info("✅ 数据库表结构就绪")
+        log.info("✅ Database tables ready")
     except Exception as e:
-        log.error(f"❌ 数据库初始化失败 (非致命错误，将继续运行): {e}")
+        log.error(f"❌ Database init failed (non-fatal, continuing): {e}")
         # 注意：这里我们捕获异常但不退出，以免影响主程序启动，但请务必关注日志
     # ==============================================================================
     

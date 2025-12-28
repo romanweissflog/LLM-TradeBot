@@ -32,7 +32,7 @@ class OITracker:
         # 加载历史数据
         self._load_history()
         
-        log.info(f"📊 OI Tracker 初始化完成 | 数据目录: {data_dir}")
+        log.info(f"📊 OI Tracker initialized | Data dir: {data_dir}")
     
     def _get_file_path(self, symbol: str) -> str:
         """获取币种对应的历史文件路径"""
@@ -52,9 +52,9 @@ class OITracker:
                         
             total_records = sum(len(v) for v in self.history.values())
             if total_records > 0:
-                log.info(f"📂 加载 OI 历史: {len(self.history)} 币种, {total_records} 条记录")
+                log.info(f"📂 OI history loaded: {len(self.history)} symbols, {total_records} records")
         except Exception as e:
-            log.warning(f"加载 OI 历史失败: {e}")
+            log.warning(f"Failed to load OI history: {e}")
     
     def _save_history(self, symbol: str):
         """保存单个币种的历史数据"""
@@ -63,7 +63,7 @@ class OITracker:
             with open(filepath, 'w') as f:
                 json.dump(self.history[symbol], f)
         except Exception as e:
-            log.error(f"保存 OI 历史失败 ({symbol}): {e}")
+            log.error(f"Failed to save OI history ({symbol}): {e}")
     
     def _cleanup_old_data(self, symbol: str):
         """清理超过 48 小时的旧数据"""

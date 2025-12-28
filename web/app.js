@@ -813,18 +813,78 @@ function renderLogs(logs) {
     const isScrolledToBottom = container.scrollHeight - container.clientHeight <= container.scrollTop + 100;
     const previousScrollTop = container.scrollTop;
 
-    container.innerHTML = logs.map(logLine => {
+    // Get current log mode from global state (default: simplified)
+    const logMode = window.logMode || 'simplified';
+
+    // Filter logs based on mode
+    const filteredLogs = logMode === 'simplified'
+        ? logs.filter(logLine => {
+            // Strip ANSI colors for filtering
+            const cleanLine = logLine.replace(/\x1b\[[0-9;]*m/g, '');
+
+            // Show if contains agent tags (new format) or important keywords
+            return (
+                // New multi-agent format tags
+                cleanLine.includes('[📊 SYSTEM]') ||
+                cleanLine.includes('[🕵️ ORACLE]') ||
+                cleanLine.includes('[👨‍🔬 STRATEGIST]') ||
+                cleanLine.includes('[🔮 PROPHET]') ||
+                cleanLine.includes('[🐂 BULL]') ||
+                cleanLine.includes('[🐻 BEAR]') ||
+                cleanLine.includes('[⚖️ CRITIC]') ||
+                cleanLine.includes('[🛡️ GUARDIAN]') ||
+                cleanLine.includes('[🚀 EXECUTOR]') ||
+                cleanLine.includes('[🎯 SYSTEM]') ||
+                // Cycle separators
+                cleanLine.includes('━━━') ||
+                // Error/Warning keywords
+                cleanLine.includes('ERROR') ||
+                cleanLine.includes('WARNING') ||
+                cleanLine.includes('❌') ||
+                cleanLine.includes('✅') ||
+                // Legacy agent names (fallback)
+                cleanLine.includes('ORACLE') ||
+                cleanLine.includes('STRATEGIST') ||
+                cleanLine.includes('PROPHET') ||
+                cleanLine.includes('GUARDIAN') ||
+                cleanLine.includes('EXECUTOR') ||
+                cleanLine.includes('CRITIC') ||
+                cleanLine.includes('BULL') ||
+                cleanLine.includes('BEAR')
+            );
+        })
+        : logs; // Show all logs in detailed mode
+
+    container.innerHTML = filteredLogs.map(logLine => {
         // Strip ANSI colors
         let cleanLine = logLine.replace(/\x1b\[[0-9;]*m/g, '');
 
-        // Parse: [time] message
+        // Parse log line format: "2025-12-28 08:59:04 | INFO | src.agents.xxx:func - Message"
         let content = cleanLine;
         let time = '';
 
-        const timeMatch = cleanLine.match(/^\[(.*?)\]\s*(.*)/);
-        if (timeMatch) {
-            time = `<span class="log-time">${timeMatch[1]}</span>`;
-            content = timeMatch[2];
+        // In simplified mode, strip file path and function name
+        if (logMode === 'simplified') {
+            // Match: "YYYY-MM-DD HH:MM:SS | LEVEL | module:function - message"
+            const logMatch = cleanLine.match(/^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s*\|\s*\w+\s*\|\s*[\w\._:]+\s*-\s*(.*)/);
+            if (logMatch) {
+                time = `<span class="log-time">${logMatch[1]}</span>`;
+                content = logMatch[2];
+            } else {
+                // Fallback: try original format "[time] message"
+                const timeMatch = cleanLine.match(/^\[(.*?)\]\s*(.*)/);
+                if (timeMatch) {
+                    time = `<span class="log-time">${timeMatch[1]}</span>`;
+                    content = timeMatch[2];
+                }
+            }
+        } else {
+            // Detailed mode: keep full format
+            const timeMatch = cleanLine.match(/^\[(.*?)\]\s*(.*)/);
+            if (timeMatch) {
+                time = `<span class="log-time">${timeMatch[1]}</span>`;
+                content = timeMatch[2];
+            }
         }
 
         // --- Color Highlighting Rules ---
@@ -878,6 +938,37 @@ function renderLogs(logs) {
         container.scrollTop = previousScrollTop;
     }
 }
+
+// Initialize log mode toggle
+window.logMode = 'simplified'; // Default mode
+
+// Add event listener for log mode toggle button
+document.addEventListener('DOMContentLoaded', function () {
+    const logModeToggle = document.getElementById('log-mode-toggle');
+    const logModeIcon = document.getElementById('log-mode-icon');
+    const logModeText = document.getElementById('log-mode-text');
+
+    if (logModeToggle) {
+        logModeToggle.addEventListener('click', function () {
+            // Toggle mode
+            window.logMode = window.logMode === 'simplified' ? 'detailed' : 'simplified';
+
+            // Update button appearance
+            if (window.logMode === 'detailed') {
+                logModeToggle.classList.add('detailed');
+                logModeIcon.textContent = '📄';
+                logModeText.textContent = 'Detailed';
+            } else {
+                logModeToggle.classList.remove('detailed');
+                logModeIcon.textContent = '📋';
+                logModeText.textContent = 'Simplified';
+            }
+
+            // Force re-render of logs
+            updateDashboard();
+        });
+    }
+});
 
 // Init
 initChart();

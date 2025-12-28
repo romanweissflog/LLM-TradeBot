@@ -63,7 +63,7 @@ class StrategyEngine:
         try:
             self.client = create_client(self.provider, llm_cfg)
             self.is_ready = True
-            log.info(f"🤖 策略引擎初始化完成 (Provider: {self.provider}, Model: {self.model})")
+            log.info(f"🤖 Strategy Engine initialized (Provider: {self.provider}, Model: {self.model})")
         except Exception as e:
             log.error(f"Failed to create LLM client: {e}")
             self.is_ready = False

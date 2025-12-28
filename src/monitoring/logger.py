@@ -23,21 +23,21 @@ class TradingLogger:
             self.db_path = Path(db_path)
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             self.db_url = f"sqlite:///{self.db_path}"
-            log.info(f"⚠️ 未检测到 DATABASE_URL，使用本地 SQLite: {self.db_path}")
+            log.info(f"⚠️ DATABASE_URL not found, using local SQLite: {self.db_path}")
         else:
             # 修正 URL 格式 (SQLAlchemy 需要 postgresql://)
             if self.db_url.startswith("postgres://"):
                 self.db_url = self.db_url.replace("postgres://", "postgresql://", 1)
             self.is_postgres = True
-            log.info("✅ 检测到 DATABASE_URL，连接 PostgreSQL 数据库...")
+            log.info("✅ DATABASE_URL detected, connecting to PostgreSQL...")
 
         # 3. 初始化数据库引擎
         try:
             self.engine = create_engine(self.db_url)
             self._init_database()
-            log.info(f"交易日志系统初始化完成，使用数据库: {'PostgreSQL' if self.is_postgres else 'SQLite'}")
+            log.info(f"Trading logger initialized, using: {'PostgreSQL' if self.is_postgres else 'SQLite'}")
         except Exception as e:
-            log.error(f"❌ 数据库连接失败: {e}")
+            log.error(f"❌ Database connection failed: {e}")
             raise e
     
     def _init_database(self):
@@ -161,7 +161,7 @@ class TradingLogger:
                 'risk_message': risk_message
             })
         
-        log.info(f"决策已记录: {decision.get('action')}")
+        log.info(f"Decision recorded: {decision.get('action')}")
     
     def log_execution(self, execution_result: Dict):
         """记录执行结果"""
@@ -189,7 +189,7 @@ class TradingLogger:
                 'message': execution_result.get('message')
             })
         
-        log.info(f"执行结果已记录: {execution_result.get('action')}")
+        log.info(f"Execution recorded: {execution_result.get('action')}")
     
     def open_trade(self, trade_info: Dict):
         """开启新交易"""

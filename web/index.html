@@ -282,8 +282,13 @@
             <!-- Row 3: Logs (Full Width) -->
             <section class="row-logs">
                 <div class="glass-panel card compound-card">
-                    <div class="compound-header">
+                    <div class="compound-header"
+                        style="display: flex; justify-content: space-between; align-items: center;">
                         <h2>📡 Live Log Output</h2>
+                        <button id="log-mode-toggle" class="btn-log-mode" title="Toggle log detail level">
+                            <span id="log-mode-icon">📋</span>
+                            <span id="log-mode-text">Simplified</span>
+                        </button>
                     </div>
                     <div class="compound-body split-log-view">
                         <!-- Documentation Sidebar -->

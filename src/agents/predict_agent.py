@@ -137,7 +137,7 @@ class PredictAgent:
                     self.ml_model = ProphetMLModel(self.model_path)
                     log.info(f"✅ ML 模型已加载: {self.model_path}")
                 else:
-                    log.warning("LightGBM 未安装，使用Rule-based scoringMode")
+                    log.warning("LightGBM not installed, using Rule-based scoring mode")
             except Exception as e:
                 log.warning(f"ML 模型加载失败: {e}，使用Rule-based scoringMode")
     
@@ -394,7 +394,7 @@ class PredictAgent:
             self.model_path = model_path
             log.info(f"✅ ML 模型已加载: {model_path}")
         else:
-            log.warning("LightGBM 未安装，无法加载 ML 模型")
+            log.warning("LightGBM not installed, cannot load ML model")
     
     def get_statistics(self) -> Dict:
         """获取预测统计信息"""

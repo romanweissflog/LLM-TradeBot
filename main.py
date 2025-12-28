@@ -148,6 +148,15 @@ class MultiAgentTradingBot:
                     self.symbols = [s.strip() for s in symbol_str.split(',') if s.strip()]
                 else:
                     self.symbols = [symbol_str]
+
+        # 🤖 AI500 Dynamic Resolution
+        if 'AI500_TOP10' in self.symbols:
+            self.symbols.remove('AI500_TOP10')
+            ai_top10 = self._resolve_ai500_symbols()
+            # Merge and deduplicate
+            self.symbols = list(set(self.symbols + ai_top10))
+            # Sort to keep stable order
+            self.symbols.sort()
                 
         self.primary_symbol = self.config.get('trading.primary_symbol', self.symbols[0])
         self.current_symbol = self.primary_symbol  # 当前处理的交易对
@@ -168,9 +177,53 @@ class MultiAgentTradingBot:
         self.saver = DataSaver() # ✅ 初始化 Multi-Agent 数据保存器
         global_state.saver = self.saver # ✅ 将 saver 共享到全局状态，供各 Agent 使用
         
+        
         # ✅ 初始化多账户管理器
         self.account_manager = AccountManager()
         self._init_accounts()
+
+    def _resolve_ai500_symbols(self):
+        """Dynamic resolution of AI500_TOP10 tag"""
+        # AI Candidates List (30+ Major AI/Data/Compute Coins)
+        AI_CANDIDATES = [
+            "FETUSDT", "RENDERUSDT", "TAOUSDT", "NEARUSDT", "GRTUSDT", 
+            "WLDUSDT", "ARKMUSDT", "LPTUSDT", "THETAUSDT", "ROSEUSDT",
+            "AGIXUSDT", "OCEANUSDT", "RNDRUSDT", # Old/Merged checks
+            "PHBUSDT", "CTXCUSDT", "NMRUSDT", "RLCUSDT", "GLMUSDT",
+            "IQUSDT", "MDTUSDT", "AIUSDT", "NFPUSDT", "XAIUSDT",
+            "JASMYUSDT", "ICPUSDT", "FILUSDT", "VETUSDT", "LINKUSDT",
+            "ACTUSDT", "GOATUSDT", "TURBOUSDT", "PNUTUSDT" 
+        ]
+        
+        try:
+            print("🤖 AI500 Dynamic Selection: Fetching 24h Volume Data...")
+            # Use temporary client to fetch tickers
+            temp_client = BinanceClient()
+            tickers = temp_client.get_all_tickers()
+            
+            # Filter and Sort
+            ai_stats = []
+            for t in tickers:
+                if t['symbol'] in AI_CANDIDATES:
+                    try:
+                        quote_vol = float(t['quoteVolume'])
+                        ai_stats.append((t['symbol'], quote_vol))
+                    except:
+                        pass
+            
+            # Sort by Volume desc
+            ai_stats.sort(key=lambda x: x[1], reverse=True)
+            
+            # Take Top 10
+            top_10 = [x[0] for x in ai_stats[:10]]
+            
+            print(f"✅ AI500 Top 10 Selected (by Vol): {', '.join(top_10)}")
+            return top_10
+            
+        except Exception as e:
+            log.error(f"Failed to resolve AI500 symbols: {e}")
+            # Fallback to defaults
+            return ["FETUSDT", "RENDERUSDT", "TAOUSDT", "NEARUSDT", "GRTUSDT", "WLDUSDT", "ARKMUSDT", "LPTUSDT", "THETAUSDT", "ROSEUSDT"]
         
         # 初始化共享 Agent (与币种无关)
         print("\n🚀 Initializing agents...")

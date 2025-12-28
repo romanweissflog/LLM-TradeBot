@@ -468,30 +468,80 @@
                         <label>Trading Symbols</label>
                         <div id="cfg-symbol-container"
                             style="background: rgba(0,0,0,0.2); padding: 10px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.1);">
-                            <div style="margin-bottom: 5px;">
-                                <label
-                                    style="display:inline-flex; align-items:center; margin-right:15px; cursor:pointer;">
-                                    <input type="checkbox" name="cfg-symbol" value="BTCUSDT" checked> <span
-                                        style="margin-left:5px">BTC/USDT</span>
-                                </label>
-                                <label
-                                    style="display:inline-flex; align-items:center; margin-right:15px; cursor:pointer;">
-                                    <input type="checkbox" name="cfg-symbol" value="ETHUSDT"> <span
-                                        style="margin-left:5px">ETH/USDT</span>
-                                </label>
+
+                            <!-- Preset Buttons -->
+                            <div style="margin-bottom: 12px; display: flex; gap: 8px;">
+                                <button type="button" class="btn-sm" onclick="selectPreset('major')"
+                                    style="background:#2d3748; color:#fff; border:1px solid rgba(255,255,255,0.2); border-radius:4px; padding:4px 8px; cursor:pointer;">
+                                    Major 4
+                                </button>
+                                <button type="button" class="btn-sm" onclick="selectPreset('ai500')"
+                                    style="background:#553c9a; color:#fff; border:1px solid rgba(255,255,255,0.2); border-radius:4px; padding:4px 8px; cursor:pointer;">
+                                    🤖 AI500 Top 10
+                                </button>
+                                <button type="button" class="btn-sm" onclick="selectPreset('all')"
+                                    style="background:#2d3748; color:#fff; border:1px solid rgba(255,255,255,0.2); border-radius:4px; padding:4px 8px; cursor:pointer;">
+                                    Select All
+                                </button>
+                                <button type="button" class="btn-sm" onclick="selectPreset('clear')"
+                                    style="background:#2d3748; color:#fff; border:1px solid rgba(255,255,255,0.2); border-radius:4px; padding:4px 8px; cursor:pointer;">
+                                    Clear
+                                </button>
                             </div>
+
+                            <!-- Major Coins -->
+                            <div style="margin-bottom: 10px;">
+                                <div style="color: #a0aec0; font-size: 0.8em; margin-bottom: 5px; font-weight: bold;">⭐
+                                    MAJOR COINS</div>
+                                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px;">
+                                    <label style="cursor:pointer;"><input type="checkbox" name="cfg-symbol"
+                                            value="BTCUSDT"> BTC</label>
+                                    <label style="cursor:pointer;"><input type="checkbox" name="cfg-symbol"
+                                            value="ETHUSDT"> ETH</label>
+                                    <label style="cursor:pointer;"><input type="checkbox" name="cfg-symbol"
+                                            value="SOLUSDT"> SOL</label>
+                                    <label style="cursor:pointer;"><input type="checkbox" name="cfg-symbol"
+                                            value="BNBUSDT"> BNB</label>
+                                </div>
+                            </div>
+
+                            <!-- AI500 Top 10 -->
                             <div>
-                                <label
-                                    style="display:inline-flex; align-items:center; margin-right:15px; cursor:pointer;">
-                                    <input type="checkbox" name="cfg-symbol" value="SOLUSDT"> <span
-                                        style="margin-left:5px">SOL/USDT</span>
-                                </label>
-                                <label
-                                    style="display:inline-flex; align-items:center; margin-right:15px; cursor:pointer;">
-                                    <input type="checkbox" name="cfg-symbol" value="BNBUSDT"> <span
-                                        style="margin-left:5px">BNB/USDT</span>
-                                </label>
+                                <div
+                                    style="color: #a0aec0; font-size: 0.8em; margin-bottom: 5px; font-weight: bold; padding-top:5px; border-top:1px solid rgba(255,255,255,0.1);">
+                                    🤖 AI SECTOR (Dynamic)</div>
+                                <div style="display: grid; grid-template-columns: 1fr; gap: 5px;">
+                                    <label
+                                        style="cursor:pointer; display:flex; align-items:center; background:rgba(85, 60, 154, 0.2); padding:8px; border-radius:4px; border:1px solid rgba(85, 60, 154, 0.4);">
+                                        <input type="checkbox" name="cfg-symbol" value="AI500_TOP10"
+                                            style="margin-right:10px;">
+                                        <span>
+                                            <strong style="color:#b794f4;">🤖 AI500 Top 10 Dynamic</strong>
+                                            <br>
+                                            <span style="font-size:0.8em; color:#a0aec0;">Automatically selects Top 10
+                                                AI coins by 24h Volume from 30+ candidates (FET, RENDER, TAO, NEAR,
+                                                etc.)</span>
+                                        </span>
+                                    </label>
+                                </div>
                             </div>
+
+                            <script>
+                                function selectPreset(type) {
+                                    const cbs = document.querySelectorAll('input[name="cfg-symbol"]');
+                                    const majorCoins = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'];
+
+                                    cbs.forEach(cb => {
+                                        if (type === 'clear') cb.checked = false;
+                                        else if (type === 'all') cb.checked = true;
+                                        else if (type === 'major') cb.checked = majorCoins.includes(cb.value);
+                                        // Specific handling for AI preset button if user clicks it
+                                        else if (type === 'ai500') {
+                                            if (cb.value === 'AI500_TOP10') cb.checked = true;
+                                        }
+                                    });
+                                }
+                            </script>
                         </div>
                     </div>
                     <div class="form-group">

@@ -98,6 +98,35 @@ class BinanceClient:
         except BinanceAPIException as e:
             log.error(f"Failed to get price: {e}")
             raise
+
+    def get_all_tickers(self) -> List[Dict]:
+        """
+        获取所有交易对的 24hr 统计数据 (用于按成交量排行)
+        Return List of dictionary:
+        {
+            'symbol': 'BTCUSDT',
+            'priceChange': '-94.99999800',
+            'priceChangePercent': '-95.960',
+            'weightedAvgPrice': '0.29628482',
+            'prevClosePrice': '0.10002000',
+            'lastPrice': '4.00000200',
+            'lastQty': '200.00000000',
+            'bidPrice': '4.00000000',
+            'askPrice': '4.00000200',
+            'openPrice': '99.00000000',
+            'highPrice': '100.00000000',
+            'lowPrice': '0.10000000',
+            'volume': '8913.30000000', 
+            'quoteVolume': '15.30000000', ...
+        }
+        """
+        try:
+            # get_ticker without symbol returns all tickers
+            tickers = self.client.get_ticker() 
+            return tickers
+        except BinanceAPIException as e:
+            log.error(f"Failed to get all tickers: {e}")
+            return []
     
     def get_orderbook(self, symbol: str, limit: int = 20) -> Dict:
         """获取订单簿"""

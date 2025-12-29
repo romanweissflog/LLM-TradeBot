@@ -80,43 +80,84 @@ Intelligent Multi-Agent Quantitative Trading Bot based on the **Adversarial Deci
 
 ---
 
-## ⚙️ Prerequisites
+## 🚀 Quick Start (One-Click Installation)
+
+### 🎯 Recommended: One-Click Installation
+
+No need to manually configure Python environment! Use our automated installation scripts:
+
+#### Method 1: Local Installation (Development)
+
+```bash
+# 1. Clone the project
+git clone <your-repo-url>
+cd LLM-TradeBot
+
+# 2. One-click install
+chmod +x install.sh
+./install.sh
+
+# 3. Configure API keys
+vim .env  # Edit and add your API keys
+
+# 4. One-click start
+./start.sh
+```
+
+Visit Dashboard: **<http://localhost:8000>**
+
+#### Method 2: Docker Deployment (Production)
+
+```bash
+# 1. Clone the project
+git clone <your-repo-url>
+cd LLM-TradeBot
+
+# 2. Configure environment
+cp .env.example .env
+vim .env  # Edit and add your API keys
+
+# 3. One-click start
+cd docker && docker-compose up -d
+```
+
+📖 **Detailed Guide**: See [QUICKSTART.md](./QUICKSTART.md)
+
+---
+
+### ⚙️ Prerequisites
 
 Before you start, make sure you have:
 
-### Required
+#### For One-Click Installation (Recommended)
 
-- ✅ **Python 3.11+** installed ([Download here](https://www.python.org/downloads/))
 - ✅ **Git** installed ([Download here](https://git-scm.com/downloads))
-- ✅ **Binance Account** ([Sign up here](https://www.binance.com/))
+- ✅ **Python 3.11+** OR **Docker** (installation script will check)
 
-### For Test Mode (Beginners)
+#### For Test Mode (Beginners)
 
 - ✅ Nothing else needed! Test mode uses virtual balance
 
-### For Live Trading (Advanced)
+#### For Live Trading (Advanced)
 
+- ✅ **Binance Account** ([Sign up here](https://www.binance.com/))
 - ✅ **Binance Futures API Keys** with trading permissions
 - ✅ **USDT in Futures Wallet** (minimum $100 recommended)
 - ⚠️ **Risk Warning**: Only trade with money you can afford to lose
 
 ---
 
-## 🚀 Quick Start
+## 📖 Manual Installation (Advanced)
 
-### Startup Flow
+If you prefer manual setup:
 
-![Quick Start Flow](./docs/quick_start_flow_9agents.png)
-
-### Detailed Steps
-
-#### 1. Install Dependencies
+### 1. Install Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-#### 2. Configure Environment
+### 2. Configure Environment
 
 ```bash
 # Copy environment variable template
@@ -126,7 +167,7 @@ cp .env.example .env
 ./set_api_keys.sh
 ```
 
-#### 3. Configure Trading Parameters
+### 3. Configure Trading Parameters
 
 ```bash
 # Copy config template
@@ -140,7 +181,7 @@ Edit `config.yaml` to set parameters:
 - Leverage (leverage)
 - Stop loss/Take profit % (stop_loss_pct, take_profit_pct)
 
-##### ⚙️ Dashboard Settings
+#### ⚙️ Dashboard Settings
 
 You can also configure all settings from the Dashboard:
 
@@ -148,13 +189,13 @@ You can also configure all settings from the Dashboard:
 
 *Settings Modal with 4 tabs: API Keys (LLM Provider), Accounts (Multi-Account), Trading, Strategy (Prompt)*
 
-#### 4. Start the Bot
+### 4. Start the Bot
 
 ![Dashboard Preview](./docs/dashboard_preview_1.png)
 ![Live Log Output](./docs/dashboard_preview_2.png)
 Built-in modern real-time monitoring dashboard.
 
-##### 🧪 Test Mode (Recommended for beginners)
+#### 🧪 Test Mode (Recommended for beginners)
 
 Simulates trading with virtual balance ($1000). No real trades executed.
 
@@ -163,7 +204,7 @@ Simulates trading with virtual balance ($1000). No real trades executed.
 python main.py --test --mode continuous
 ```
 
-##### 🔴 Live Trading Mode
+#### 🔴 Live Trading Mode
 
 ⚠️ **WARNING**: Executes real trades on Binance Futures!
 
@@ -241,7 +282,7 @@ All indicators use semantic icons and two-line display format for quick visual s
 - **📜 Trade History**: Complete record of all trades with Open/Close cycles and PnL statistics
 - **📡 Live Log Output**: Real-time scrolling logs with highlighted Agent tags (Oracle, Strategist, Critic, Guardian), 500-line history buffer
 
-#### 5. Common Operations
+### 5. Common Operations
 
 ```bash
 # Stop the bot

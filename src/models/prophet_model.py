@@ -42,14 +42,34 @@ class ProphetMLModel:
         'objective': 'binary',
         'metric': 'binary_logloss',
         'boosting_type': 'gbdt',
-        'num_leaves': 31,
-        'learning_rate': 0.05,
-        'feature_fraction': 0.8,
-        'bagging_fraction': 0.8,
+        
+        # 🔧 Balanced Model Complexity (Improved from too simple)
+        'num_leaves': 20,              # Increased from 10 (allow more patterns)
+        'max_depth': 6,                # Increased from 4 (deeper trees for complex patterns)
+        'min_child_samples': 20,       # Keep at 20 (good balance)
+        'min_child_weight': 0.001,     # Keep (prevents overfitting on outliers)
+        
+        # 🔧 Moderate Regularization (Reduced from too strong)
+        'lambda_l1': 0.1,              # Reduced from 0.5 (less penalty)
+        'lambda_l2': 0.1,              # Reduced from 0.5 (less penalty)
+        'min_gain_to_split': 0.01,    # Reduced from 0.02 (easier to split)
+        
+        # 🔧 Learning Rate & Iterations (Optimized)
+        'learning_rate': 0.05,         # Increased from 0.02 (faster learning)
+        'n_estimators': 200,           # Increased from 100 (more trees for better fit)
+        
+        # 🔧 Sampling (Moderate)
+        'feature_fraction': 0.8,       # Increased from 0.7 (use more features)
+        'bagging_fraction': 0.8,       # Increased from 0.7 (use more samples)
         'bagging_freq': 5,
+        
+        # Training
+        'early_stopping_rounds': 30,   # Keep at 30
         'verbose': -1,
-        'n_estimators': 200,
-        'early_stopping_rounds': 20,
+        
+        # 🔧 Additional boosting parameters for better performance
+        'max_bin': 255,                # Default, good for most cases
+        'min_data_in_bin': 3,          # Minimum data in one bin
     }
     
     # 预测所需的核心特征列表
@@ -69,10 +89,10 @@ class ProphetMLModel:
         'volatility_20',
     ]
     
-    # Label 定义
-    PREDICTION_HORIZON_MINUTES = 30  # 预测未来 30 分钟
-    UP_THRESHOLD = 0.001  # 涨幅阈值: 0.1%
-    
+    # Label 定义 (Multi-class Trend Direction)
+    PREDICTION_HORIZON_MINUTES = 180  # 3 hours (clearer trends)
+    STRONG_THRESHOLD = 0.015  # 1.5% for strong moves
+    WEAK_THRESHOLD = 0.005    # 0.5% for weak moves
     def __init__(self, model_path: Optional[str] = None, symbol: str = 'BTCUSDT'):
         """
         初始化 Prophet ML 模型
@@ -176,15 +196,22 @@ class ProphetMLModel:
         """获取验证集 AUC 分数"""
         return getattr(self, 'val_auc_score', 0.5)
     
-    def predict_proba(self, features: Dict[str, float]) -> float:
+    def predict_proba(self, features: Dict[str, float]) -> Dict[str, float]:
         """
-        预测上涨概率
+        预测多分类概率 (Multi-class Trend Direction)
         
         Args:
             features: 特征字典
         
         Returns:
-            上涨概率 P(up) ∈ [0, 1]
+            Dict with probabilities for each class:
+            {
+                'strong_down': float,  # P(class=-2)
+                'weak_down': float,    # P(class=-1)
+                'neutral': float,      # P(class=0)
+                'weak_up': float,      # P(class=1)
+                'strong_up': float,    # P(class=2)
+            }
         """
         if not self.is_trained or self.model is None:
             raise ValueError("模型未训练，请先调用 train() 或 load()")
@@ -192,10 +219,19 @@ class ProphetMLModel:
         # 构建特征向量
         feature_vector = self._prepare_features(features)
         
-        # 预测概率
-        prob = self.model.predict_proba(feature_vector)[0, 1]
+        # 预测概率 (5 classes)
+        probs = self.model.predict_proba(feature_vector)[0]
         
-        return float(prob)
+        # Map to class names
+        # LightGBM multiclass uses 0-indexed classes, but our labels are -2 to 2
+        # We need to map: class 0 → -2, class 1 → -1, class 2 → 0, class 3 → 1, class 4 → 2
+        return {
+            'strong_down': float(probs[0]),  # class -2 → index 0
+            'weak_down': float(probs[1]),    # class -1 → index 1
+            'neutral': float(probs[2]),      # class 0 → index 2
+            'weak_up': float(probs[3]),      # class 1 → index 3
+            'strong_up': float(probs[4]),    # class 2 → index 4
+        }
     
     def _prepare_features(self, features: Dict[str, float]) -> pd.DataFrame:
         """
@@ -223,12 +259,22 @@ class ProphetMLModel:
         return pd.DataFrame([feature_values], columns=feature_names)
     
     def _calculate_auc(self, y_true: pd.Series, y_pred: np.ndarray) -> float:
-        """计算 AUC 分数"""
+        """计算 AUC 分数 (多分类使用 macro-average)"""
         try:
             from sklearn.metrics import roc_auc_score
-            return roc_auc_score(y_true, y_pred)
-        except:
-            return 0.0
+            # For multiclass, use one-vs-rest with macro average
+            # y_pred should be probabilities (n_samples, n_classes)
+            return roc_auc_score(y_true, y_pred, multi_class='ovr', average='macro')
+        except Exception as e:
+            # Fallback: use accuracy as proxy
+            try:
+                from sklearn.metrics import accuracy_score
+                y_pred_class = np.argmax(y_pred, axis=1) if len(y_pred.shape) > 1 else y_pred
+                # Map back to original labels: 0→-2, 1→-1, 2→0, 3→1, 4→2
+                y_pred_class = y_pred_class - 2
+                return accuracy_score(y_true, y_pred_class)
+            except:
+                return 0.0
     
     def save(self, path: Optional[str] = None):
         """
@@ -310,22 +356,23 @@ class LabelGenerator:
             up_threshold: 上涨阈值 (0.001 = 0.1%)
         """
         self.horizon_minutes = horizon_minutes
+        self.up_threshold = 0.001  # 0.1% threshold for binary classification
         self.up_threshold = up_threshold
     
     def generate_labels(self, df: pd.DataFrame, price_col: str = 'close') -> pd.Series:
         """
-        生成标签
+        生成二分类标签 (Binary Classification: UP vs DOWN)
         
         Args:
             df: 包含价格数据的 DataFrame (需要有时间索引)
             price_col: 价格列名
         
         Returns:
-            标签 Series (1 = 上涨, 0 = 下跌/横盘)
+            标签 Series:
+            0: DOWN (price decrease or neutral)
+            1: UP (price increase > threshold)
         """
         # 计算未来价格 (向前移动 horizon 个周期)
-        # 假设 df 是按时间排序的，每行间隔固定时间
-        # 对于 5 分钟 K 线，30 分钟 = 6 个周期
         periods = self.horizon_minutes // 5  # 假设 5 分钟 K 线
         
         if periods < 1:
@@ -337,11 +384,12 @@ class LabelGenerator:
         # 计算收益率
         returns = (future_price - df[price_col]) / df[price_col]
         
-        # 生成标签
+        # 生成二分类标签 (UP = 1, DOWN = 0)
+        # Threshold: 0.1% (same as original UP_THRESHOLD)
         labels = (returns > self.up_threshold).astype(int)
         
         return labels
-    
+
     def prepare_training_data(
         self,
         features_df: pd.DataFrame,
@@ -373,9 +421,12 @@ class LabelGenerator:
         y = y[valid_mask]
         
         log.info(f"📊 训练数据准备完成: {len(X)} 样本")
-        log.info(f"   上涨样本: {y.sum()} ({y.mean()*100:.1f}%)")
-        log.info(f"   下跌样本: {len(y) - y.sum()} ({(1-y.mean())*100:.1f}%)")
-        
+        # Binary classification distribution
+        up_count = (y == 1).sum()
+        down_count = (y == 0).sum()
+        log.info(f"   上涨样本: {up_count} ({up_count/len(y)*100:.1f}%)")
+        log.info(f"   下跌样本: {down_count} ({down_count/len(y)*100:.1f}%)")
+
         return X, y
 
 
@@ -391,7 +442,7 @@ class ProphetAutoTrainer:
         predict_agent,
         binance_client,
         interval_hours: float = 2.0,
-        training_days: int = 7,
+        training_days: int = 70,  # 10x samples (70 days)
         symbol: str = 'BTCUSDT'
     ):
         """

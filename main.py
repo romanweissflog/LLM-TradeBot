@@ -2132,7 +2132,7 @@ class MultiAgentTradingBot:
                 predict_agent=primary_agent,
                 binance_client=self.client,
                 interval_hours=2.0,  # 每 2 小时训练一次
-                training_days=7,     # 使用最近 7 天数据
+                training_days=70,    # 使用最近 70 天数据 (10x samples)
                 symbol=self.primary_symbol
             )
             self.auto_trainer.start()

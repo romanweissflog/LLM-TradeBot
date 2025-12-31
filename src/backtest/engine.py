@@ -41,6 +41,9 @@ class BacktestConfig:
     contract_type: str = "linear"  # "linear" 或 "inverse"
     contract_size: float = 100.0  # 币本位合约面值 (BTC=100 USD)
     strategy_mode: str = "technical"  # "technical" (EMA) or "agent" (Multi-Agent)
+    use_llm: bool = False  # 是否在回测中调用 LLM（费用高、速度慢）
+    llm_cache: bool = True  # 缓存 LLM 响应
+    llm_throttle_ms: int = 100  # LLM 调用间隔（毫秒），避免速率限制
 
 
 @dataclass

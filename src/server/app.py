@@ -437,6 +437,9 @@ class BacktestRequest(BaseModel):
     stop_loss_pct: float = 1.0
     take_profit_pct: float = 2.0
     strategy_mode: str = "technical" # "technical" or "agent"
+    use_llm: bool = False  # Enable LLM calls in backtest
+    llm_cache: bool = True  # Cache LLM responses
+    llm_throttle_ms: int = 100  # Throttle between LLM calls (ms)
 
 @app.post("/api/backtest/run")
 async def run_backtest(config: BacktestRequest, authenticated: bool = Depends(verify_auth)):
@@ -459,8 +462,10 @@ async def run_backtest(config: BacktestRequest, authenticated: bool = Depends(ve
             step=config.step,
             stop_loss_pct=config.stop_loss_pct,
             take_profit_pct=config.take_profit_pct,
-            # strategy_mode=config.strategy_mode 
-            strategy_mode='agent' # Force Multi-Agent Mode as per user request
+            strategy_mode='agent',  # Force Multi-Agent Mode
+            use_llm=config.use_llm,  # Enable LLM calls
+            llm_cache=config.llm_cache,  # Cache LLM responses
+            llm_throttle_ms=config.llm_throttle_ms  # Rate limiting
         )
         
         engine = BacktestEngine(bt_config)

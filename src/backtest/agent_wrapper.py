@@ -14,6 +14,7 @@ Date: 2025-12-31
 
 import pandas as pd
 import numpy as np
+import asyncio
 from typing import Dict, Any, Optional
 from dataclasses import dataclass
 
@@ -181,7 +182,14 @@ class BacktestAgentRunner:
         self.decision_core = DecisionCoreAgent()
         self.calculator = BacktestSignalCalculator()
         
-        log.info("🤖 BacktestAgentRunner initialized")
+        # Initialize LLM engine if enabled
+        if self.config.get('use_llm', False):
+            from src.strategy.llm_engine import StrategyEngine
+            self.llm_engine = StrategyEngine()
+            log.info("🤖 BacktestAgentRunner initialized with LLM Engine enabled")
+        else:
+            self.llm_engine = None
+            log.info("🤖 BacktestAgentRunner initialized (LLM disabled)")
 
     async def step(self, snapshot) -> Dict:
         """
@@ -204,13 +212,31 @@ class BacktestAgentRunner:
                 market_data=market_data
             )
             
-            # 3. Format result
+            # 3. LLM Enhancement (if enabled)
+            if self.llm_engine:
+                # Throttle to avoid rate limits
+                throttle_ms = self.config.get('llm_throttle_ms', 100)
+                if throttle_ms > 0:
+                    await asyncio.sleep(throttle_ms / 1000)
+                
+                # Call LLM with context
+                llm_decision = await self._call_llm_with_context(
+                    snapshot, quant_analysis, vote_result
+                )
+                
+                # Merge LLM reasoning with quant signals
+                final_decision = self._merge_decisions(vote_result, llm_decision)
+            else:
+                final_decision = vote_result
+            
+            # 4. Format result
             return {
-                'action': vote_result.action, # 'long', 'short', 'hold'...
-                'confidence': vote_result.confidence,
-                'reason': vote_result.reason,
-                'vote_details': vote_result.vote_details,
-                'weighted_score': vote_result.weighted_score
+                'action': final_decision.action,
+                'confidence': final_decision.confidence,
+                'reason': final_decision.reason,
+                'vote_details': getattr(final_decision, 'vote_details', {}),
+                'weighted_score': getattr(final_decision, 'weighted_score', 0),
+                'llm_enhanced': self.llm_engine is not None
             }
             
         except Exception as e:
@@ -220,3 +246,91 @@ class BacktestAgentRunner:
                 'confidence': 0,
                 'reason': f"Error: {str(e)}"
             }
+    
+    async def _call_llm_with_context(self, snapshot, quant_analysis, vote_result):
+        """Call LLM with full market context"""
+        import json
+        from datetime import datetime
+        
+        # Build context string
+        context_text = self._build_llm_context(snapshot, quant_analysis, vote_result)
+        
+        # Build context data dict
+        context_data = {
+            'symbol': self.config.get('symbol', 'BTCUSDT'),
+            'timestamp': datetime.now().isoformat(),
+            'current_price': snapshot.live_5m.get('close', 0),
+            'quant_analysis': quant_analysis,
+            'vote_result': {
+                'action': vote_result.action,
+                'confidence': vote_result.confidence,
+                'weighted_score': vote_result.weighted_score
+            }
+        }
+        
+        # Call LLM engine
+        try:
+            llm_result_dict = self.llm_engine.make_decision(
+                market_context_text=context_text,
+                market_context_data=context_data
+            )
+            
+            # Convert dict to VoteResult-like object
+            from src.agents.decision_core_agent import VoteResult
+            llm_result = VoteResult(
+                action=llm_result_dict.get('action', 'hold'),
+                confidence=llm_result_dict.get('confidence', 0),
+                reason=llm_result_dict.get('reasoning', 'LLM decision'),
+                weighted_score=llm_result_dict.get('weighted_score', 0),
+                vote_details={},
+                multi_period_aligned=False
+            )
+            
+            log.info(f"🤖 LLM Decision: {llm_result.action} (confidence: {llm_result.confidence}%)")
+            return llm_result
+        except Exception as e:
+            log.warning(f"LLM call failed: {e}, falling back to quant decision")
+            return vote_result
+    
+    def _build_llm_context(self, snapshot, quant_analysis, vote_result):
+        """Build context string for LLM"""
+        import json
+        
+        current_price = snapshot.live_5m.get('close', 0)
+        
+        return f"""Market Analysis Summary:
+- Current Price: ${current_price:.2f}
+- Quantitative Vote: {vote_result.action} (confidence: {vote_result.confidence:.1f}%)
+- Weighted Score: {vote_result.weighted_score:.1f}
+- Multi-Period Aligned: {vote_result.multi_period_aligned}
+
+Technical Signals:
+{json.dumps(quant_analysis, indent=2, default=str)}
+
+Quantitative Reasoning: {vote_result.reason}
+
+Please provide your trading decision based on this analysis."""
+    
+    def _merge_decisions(self, quant_vote, llm_decision):
+        """Merge quantitative and LLM decisions"""
+        from dataclasses import replace
+        
+        # Strategy: LLM can override if high confidence, otherwise enhance reasoning
+        if llm_decision.confidence > 70:
+            # LLM override with high confidence
+            log.info(f"🎯 LLM override: {llm_decision.action} (confidence: {llm_decision.confidence}%)")
+            return llm_decision
+        else:
+            # Enhance quant decision with LLM reasoning
+            enhanced_reason = f"{quant_vote.reason} | LLM: {llm_decision.reason}"
+            
+            # Create a new VoteResult with enhanced reasoning
+            try:
+                enhanced_vote = replace(quant_vote, reason=enhanced_reason)
+            except:
+                # Fallback if replace doesn't work
+                quant_vote.reason = enhanced_reason
+                enhanced_vote = quant_vote
+            
+            log.info(f"✨ Enhanced decision: {enhanced_vote.action} with LLM reasoning")
+            return enhanced_vote

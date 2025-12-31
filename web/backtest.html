@@ -622,14 +622,15 @@
                     <div class="form-group" style="grid-column: 1 / -1;">
                         <label style="display:flex; align-items:center; gap:8px; cursor:pointer;"
                             onclick="toggleAdvanced()">
-                            ⚙️ Advanced Settings <span id="advancedToggle">▶</span>
+                            <span data-i18n="backtest.advanced">⚙️ Advanced Settings</span> <span
+                                id="advancedToggle">▶</span>
                         </label>
                     </div>
 
                     <div id="advancedSettings" style="display:none; grid-column: 1 / -1;">
                         <div class="form-grid" style="margin-top:10px;">
                             <div class="form-group">
-                                <label>Leverage</label>
+                                <label data-i18n="backtest.leverage">Leverage</label>
                                 <div style="display:flex; align-items:center; gap:10px;">
                                     <input type="range" id="leverage" min="1" max="20" value="5" style="flex:1;"
                                         oninput="updateLeverageDisplay()">
@@ -638,21 +639,21 @@
                                 </div>
                             </div>
                             <div class="form-group">
-                                <label>Margin Mode</label>
+                                <label data-i18n="backtest.margin">Margin Mode</label>
                                 <select id="marginMode">
                                     <option value="cross" selected>🔗 Cross (全仓)</option>
                                     <option value="isolated">🔒 Isolated (逐仓)</option>
                                 </select>
                             </div>
                             <div class="form-group">
-                                <label>Contract Type</label>
+                                <label data-i18n="backtest.contract">Contract Type</label>
                                 <select id="contractType">
                                     <option value="linear" selected>💵 U本位 (Linear)</option>
                                     <option value="inverse">🪙 币本位 (Inverse)</option>
                                 </select>
                             </div>
                             <div class="form-group">
-                                <label>Fee Tier</label>
+                                <label data-i18n="backtest.feetier">Fee Tier</label>
                                 <select id="feeTier">
                                     <option value="vip0" selected>VIP0 (Maker 0.02% / Taker 0.04%)</option>
                                     <option value="vip1">VIP1 (Maker 0.016% / Taker 0.04%)</option>
@@ -670,7 +671,7 @@
                     </div>
 
                     <div class="form-group" style="justify-content: flex-end;">
-                        <button class="run-btn" id="runBtn" onclick="runBacktest()">
+                        <button class="run-btn" id="runBtn" onclick="runBacktest()" data-i18n="backtest.run">
                             ▶️ Run Backtest
                         </button>
                     </div>
@@ -776,14 +777,14 @@
                     <table class="trades-table">
                         <thead>
                             <tr>
-                                <th>Time</th>
-                                <th>Side</th>
-                                <th>Entry</th>
-                                <th>Exit</th>
-                                <th>PnL</th>
-                                <th>PnL %</th>
-                                <th>Hold Time</th>
-                                <th>Reason</th>
+                                <th data-i18n="trade.time">Time</th>
+                                <th data-i18n="trade.side">Side</th>
+                                <th data-i18n="trade.entry">Entry</th>
+                                <th data-i18n="trade.exit">Exit</th>
+                                <th data-i18n="trade.pnl">PnL</th>
+                                <th data-i18n="trade.pnlpct">PnL %</th>
+                                <th data-i18n="trade.duration">Hold Time</th>
+                                <th data-i18n="trade.reason">Reason</th>
                             </tr>
                         </thead>
                         <tbody id="tradesTableBody">
@@ -841,8 +842,8 @@
         </script>
 
         <script>
-            let equityChart = null;
-            let drawdownChart = null;
+            let equityChartInstance = null;
+            let drawdownChartInstance = null;
             let backtestHistory = JSON.parse(localStorage.getItem('backtestHistory') || '[]');
 
             // Preset symbol groups
@@ -1054,17 +1055,22 @@
             }
 
             function renderCharts(equityCurve) {
+                console.log('renderCharts called with', equityCurve.length, 'points');
                 const labels = equityCurve.map(p => p.timestamp.split('T')[0]);
                 const equity = equityCurve.map(p => p.total_equity);
                 const drawdown = equityCurve.map(p => p.drawdown_pct);
 
                 // Destroy old charts
-                if (equityChart) equityChart.destroy();
-                if (drawdownChart) drawdownChart.destroy();
+                if (equityChartInstance) {
+                    equityChartInstance.destroy();
+                }
+                if (drawdownChartInstance) {
+                    drawdownChartInstance.destroy();
+                }
 
                 // Equity Chart
                 const eqCtx = document.getElementById('equityChart').getContext('2d');
-                equityChart = new Chart(eqCtx, {
+                equityChartInstance = new Chart(eqCtx, {
                     type: 'line',
                     data: {
                         labels: labels,
@@ -1097,7 +1103,7 @@
 
                 // Drawdown Chart
                 const ddCtx = document.getElementById('drawdownChart').getContext('2d');
-                drawdownChart = new Chart(ddCtx, {
+                drawdownChartInstance = new Chart(ddCtx, {
                     type: 'line',
                     data: {
                         labels: labels,
@@ -1269,7 +1275,10 @@
 
             // Show details from history item
             function showHistoryDetail(index) {
+                console.log('Showing history detail for index:', index);
                 const h = backtestHistory[index];
+                console.log('History item:', h);
+
                 if (!h || !h.equityCurve || h.equityCurve.length === 0) {
                     alert('No detailed data available for this backtest');
                     return;
@@ -1289,13 +1298,26 @@
                 document.getElementById('winRate').textContent = h.winRate ? `${h.winRate}%` : '-';
                 document.getElementById('totalTrades').textContent = h.trades || '-';
                 document.getElementById('profitFactor').textContent = h.profitFactor || '-';
-                document.getElementById('avgTrade').textContent = '-';
 
-                // Render charts with stored data
-                renderCharts(h.equityCurve);
+                // Force destroy old charts before rendering new ones
+                if (equityChartInstance) {
+                    equityChartInstance.destroy();
+                    equityChartInstance = null;
+                }
+                if (drawdownChartInstance) {
+                    drawdownChartInstance.destroy();
+                    drawdownChartInstance = null;
+                }
+
+                // Small delay to ensure charts are destroyed
+                setTimeout(() => {
+                    console.log('Rendering charts with', h.equityCurve.length, 'data points');
+                    renderCharts(h.equityCurve);
+                }, 100);
 
                 // Render trades table with stored data
                 if (h.tradesList && h.tradesList.length > 0) {
+                    console.log('Rendering', h.tradesList.length, 'trades');
                     renderTradesTable(h.tradesList);
                 } else {
                     document.getElementById('tradesTableBody').innerHTML =

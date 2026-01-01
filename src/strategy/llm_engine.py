@@ -462,13 +462,13 @@ Analyze the above data following the strategy rules in system prompt. Output you
             log.error(f"confidence超出范围: {decision['confidence']}")
             return False
         
-        # STRICT ENFORCEMENT: Open trades must have confidence >= 80
+        # STRICT ENFORCEMENT: Open trades must have confidence >= 75
         action = decision['action']
         confidence = decision['confidence']
-        if action in ['open_long', 'open_short'] and confidence < 80:
-            log.warning(f"🚫 Confidence < 80 ({confidence}%) for {action}, converting to 'wait'")
+        if action in ['open_long', 'open_short'] and confidence < 75:
+            log.warning(f"🚫 Confidence < 75 ({confidence}%) for {action}, converting to 'wait'")
             decision['action'] = 'wait'
-            decision['reasoning'] = f"Low confidence ({confidence}% < 80%), wait for better setup"
+            decision['reasoning'] = f"Low confidence ({confidence}% < 75%), wait for better setup"
         
         if not (1 <= decision['leverage'] <= config.risk.get('max_leverage', 5)):
             log.error(f"leverage超出范围: {decision['leverage']}")

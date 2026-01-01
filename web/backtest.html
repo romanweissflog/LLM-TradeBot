@@ -230,6 +230,69 @@
             color: #ef4444 !important;
         }
 
+        .live-chart-container,
+        .live-trades-container {
+            background: rgba(0, 153, 255, 0.03);
+            border: 1px solid rgba(0, 153, 255, 0.1);
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 15px;
+            display: none;
+        }
+
+        .live-chart-container {
+            height: 280px;
+            position: relative;
+        }
+
+        .live-chart-container canvas {
+            max-height: 240px !important;
+            width: 100% !important;
+        }
+
+        /* Specific styling for drawdown chart */
+        #liveDrawdownContainer {
+            background: rgba(255, 68, 68, 0.03);
+            border: 1px solid rgba(255, 68, 68, 0.1);
+        }
+
+        .live-chart-container h4,
+        .live-trades-container h4 {
+            margin: 0 0 10px 0;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
+        .trades-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .trades-table th {
+            background: var(--bg-secondary);
+            padding: 8px;
+            text-align: left;
+            font-size: 12px;
+            color: var(--text-secondary);
+            border-bottom: 2px solid var(--border-color);
+        }
+
+        .trades-table td {
+            padding: 6px 8px;
+            border-bottom: 1px solid var(--border-color);
+            font-size: 13px;
+        }
+
+        .trade-long {
+            color: #10b981;
+            font-weight: 600;
+        }
+
+        .trade-short {
+            color: #ef4444;
+            font-weight: 600;
+        }
+
         /* Results Section */
         .results-section {
             display: none;
@@ -776,6 +839,47 @@
                         <span class="metric-label">收益:</span>
                         <span class="metric-value" id="currentProfit" style="color: #888;">$0.00 (0.00%)</span>
                     </div>
+                    <div class="metric-row">
+                        <span class="metric-label">交易次数:</span>
+                        <span class="metric-value" id="liveTradeCount">0</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">胜率:</span>
+                        <span class="metric-value" id="liveWinRate">0%</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">最大回撤:</span>
+                        <span class="metric-value negative" id="liveMaxDrawdown">0%</span>
+                    </div>
+                </div>
+
+                <!-- Live Equity Chart -->
+                <div class="live-chart-container" id="liveChartContainer">
+                    <h4>📈 实时净值曲线</h4>
+                    <canvas id="liveEquityChart" width="600" height="200"></canvas>
+                </div>
+
+                <!-- Live Drawdown Chart -->
+                <div class="live-chart-container" id="liveDrawdownContainer">
+                    <h4>📉 实时回撤曲线</h4>
+                    <canvas id="liveDrawdownChart" width="600" height="200"></canvas>
+                </div>
+
+                <!-- Live Trades -->
+                <div class="live-trades-container" id="liveTradesContainer">
+                    <h4>💼 最近交易</h4>
+                    <table class="trades-table">
+                        <thead>
+                            <tr>
+                                <th>时间</th>
+                                <th>方向</th>
+                                <th>价格</th>
+                                <th>盈亏</th>
+                            </tr>
+                        </thead>
+                        <tbody id="liveTradesBody">
+                        </tbody>
+                    </table>
                 </div>
             </div>
 
@@ -1059,6 +1163,291 @@
             });
 
             // Global AbortController for cancellation
+            // Live visualization variables
+            let liveEquityChart = null;
+            let liveEquityData = [];
+            let liveDrawdownChart = null;
+            let liveDrawdownData = [];
+
+            // Initialize live equity chart
+            function initLiveChart() {
+                // Destroy existing chart if it exists
+                if (liveEquityChart) {
+                    liveEquityChart.destroy();
+                    liveEquityChart = null;
+                }
+
+                const canvas = document.getElementById('liveEquityChart');
+                if (!canvas) {
+                    console.error('Live equity chart canvas not found');
+                    return;
+                }
+
+                const ctx = canvas.getContext('2d');
+                liveEquityChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: [],
+                        datasets: [{
+                            label: '净值',
+                            data: [],
+                            borderColor: '#0099ff',
+                            backgroundColor: 'rgba(0, 153, 255, 0.15)',
+                            borderWidth: 2.5,
+                            tension: 0.4,
+                            fill: true,
+                            pointRadius: 0,
+                            pointHoverRadius: 4,
+                            pointHoverBackgroundColor: '#0099ff',
+                            pointHoverBorderColor: '#fff',
+                            pointHoverBorderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        animation: false,
+                        interaction: {
+                            intersect: false,
+                            mode: 'index'
+                        },
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                enabled: true,
+                                backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                                titleColor: '#fff',
+                                bodyColor: '#fff',
+                                borderColor: '#0099ff',
+                                borderWidth: 1,
+                                callbacks: {
+                                    label: function (context) {
+                                        return '净值: $' + context.parsed.y.toFixed(2);
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                display: true,
+                                grid: {
+                                    color: 'rgba(255, 255, 255, 0.05)',
+                                    drawBorder: false
+                                },
+                                ticks: {
+                                    maxTicksLimit: 8,
+                                    color: '#888',
+                                    font: { size: 11 }
+                                }
+                            },
+                            y: {
+                                display: true,
+                                beginAtZero: false,
+                                grid: {
+                                    color: 'rgba(255, 255, 255, 0.05)',
+                                    drawBorder: false
+                                },
+                                ticks: {
+                                    color: '#0099ff',
+                                    font: { size: 11, weight: '600' },
+                                    callback: function (value) {
+                                        return '$' + value.toFixed(0);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+
+            // Initialize live drawdown chart
+            function initLiveDrawdownChart() {
+                // Destroy existing chart if it exists
+                if (liveDrawdownChart) {
+                    liveDrawdownChart.destroy();
+                    liveDrawdownChart = null;
+                }
+
+                const canvas = document.getElementById('liveDrawdownChart');
+                if (!canvas) {
+                    console.error('Live drawdown chart canvas not found');
+                    return;
+                }
+
+                const ctx = canvas.getContext('2d');
+                liveDrawdownChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: [],
+                        datasets: [{
+                            label: '回撤 %',
+                            data: [],
+                            borderColor: '#ef4444',
+                            backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                            borderWidth: 2.5,
+                            tension: 0.4,
+                            fill: true,
+                            pointRadius: 0,
+                            pointHoverRadius: 4,
+                            pointHoverBackgroundColor: '#ef4444',
+                            pointHoverBorderColor: '#fff',
+                            pointHoverBorderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        animation: false,
+                        interaction: {
+                            intersect: false,
+                            mode: 'index'
+                        },
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                enabled: true,
+                                backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                                titleColor: '#fff',
+                                bodyColor: '#fff',
+                                borderColor: '#ef4444',
+                                borderWidth: 1,
+                                callbacks: {
+                                    label: function (context) {
+                                        return '回撤: ' + context.parsed.y.toFixed(2) + '%';
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                display: true,
+                                grid: {
+                                    color: 'rgba(255, 255, 255, 0.05)',
+                                    drawBorder: false
+                                },
+                                ticks: {
+                                    maxTicksLimit: 8,
+                                    color: '#888',
+                                    font: { size: 11 }
+                                }
+                            },
+                            y: {
+                                display: true,
+                                reverse: false,
+                                beginAtZero: true,
+                                grid: {
+                                    color: 'rgba(255, 255, 255, 0.05)',
+                                    drawBorder: false
+                                },
+                                ticks: {
+                                    color: '#ef4444',
+                                    font: { size: 11, weight: '600' },
+                                    callback: function (value) {
+                                        return value.toFixed(1) + '%';
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+
+            // Update live chart with new equity point
+            function updateLiveChart(equityPoint) {
+                if (!liveEquityChart) {
+                    initLiveChart();
+                    document.getElementById('liveChartContainer').style.display = 'block';
+                }
+
+                const time = new Date(equityPoint.timestamp).toLocaleTimeString('zh-CN', {
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+
+                liveEquityChart.data.labels.push(time);
+                liveEquityChart.data.datasets[0].data.push(equityPoint.total_equity);
+
+                // Limit data points to prevent performance issues (max 150)
+                const maxPoints = 150;
+                if (liveEquityChart.data.labels.length > maxPoints) {
+                    liveEquityChart.data.labels.shift();
+                    liveEquityChart.data.datasets[0].data.shift();
+                }
+
+                // Use 'none' mode for better performance (no animation)
+                liveEquityChart.update('none');
+            }
+
+            // Update live drawdown chart with new equity point
+            function updateLiveDrawdownChart(equityPoint) {
+                if (!liveDrawdownChart) {
+                    initLiveDrawdownChart();
+                    document.getElementById('liveDrawdownContainer').style.display = 'block';
+                }
+
+                const time = new Date(equityPoint.timestamp).toLocaleTimeString('zh-CN', {
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+
+                liveDrawdownChart.data.labels.push(time);
+                // Ensure drawdown is always negative or zero for proper display
+                const drawdownValue = Math.abs(equityPoint.drawdown_pct);
+                liveDrawdownChart.data.datasets[0].data.push(drawdownValue);
+
+                // Limit data points to prevent performance issues (max 150)
+                const maxPoints = 150;
+                if (liveDrawdownChart.data.labels.length > maxPoints) {
+                    liveDrawdownChart.data.labels.shift();
+                    liveDrawdownChart.data.datasets[0].data.shift();
+                }
+
+                // Use 'none' mode for better performance (no animation)
+                liveDrawdownChart.update('none');
+            }
+
+            // Update live trades table
+            function updateLiveTrades(trades) {
+                const container = document.getElementById('liveTradesContainer');
+                const tbody = document.getElementById('liveTradesBody');
+
+                container.style.display = 'block';
+                tbody.innerHTML = '';
+
+                trades.forEach(trade => {
+                    const row = tbody.insertRow();
+                    const time = new Date(trade.timestamp).toLocaleTimeString();
+                    const sideClass = trade.side === 'long' ? 'trade-long' : 'trade-short';
+                    const pnlClass = trade.pnl >= 0 ? 'positive' : 'negative';
+
+                    row.innerHTML = `
+                        <td>${time}</td>
+                        <td class="${sideClass}">${trade.side.toUpperCase()}</td>
+                        <td>$${trade.price.toFixed(2)}</td>
+                        <td class="${pnlClass}">${trade.pnl >= 0 ? '+' : ''}$${trade.pnl.toFixed(2)}</td>
+                    `;
+                });
+            }
+
+            // Reset live visualization
+            function resetLiveVisualization() {
+                if (liveEquityChart) {
+                    liveEquityChart.destroy();
+                    liveEquityChart = null;
+                }
+
+                if (liveDrawdownChart) {
+                    liveDrawdownChart.destroy();
+                    liveDrawdownChart = null;
+                }
+
+                document.getElementById('realtimeMetrics').style.display = 'none';
+                document.getElementById('liveChartContainer').style.display = 'none';
+                document.getElementById('liveDrawdownContainer').style.display = 'none';
+                document.getElementById('liveTradesContainer').style.display = 'none';
+                document.getElementById('liveTradesBody').innerHTML = '';
+            }
+
             let backtestAbortController = null;
 
             async function runBacktest() {
@@ -1151,7 +1540,7 @@
                                 if (msg.type === 'progress') {
                                     updateProgress(msg.percent, `Running... ${msg.percent}%`);
 
-                                    // Update real-time profit display
+                                    // Update basic profit display
                                     if (msg.current_equity !== undefined && msg.current_equity !== null) {
                                         const metricsDiv = document.getElementById('realtimeMetrics');
                                         metricsDiv.style.display = 'flex';
@@ -1168,11 +1557,31 @@
 
                                         profitEl.className = 'metric-value ' + (profit >= 0 ? 'positive' : 'negative');
                                     }
+
+                                    // Update live equity chart
+                                    if (msg.equity_point) {
+                                        updateLiveChart(msg.equity_point);
+                                        updateLiveDrawdownChart(msg.equity_point);
+                                    }
+
+                                    // Update live metrics
+                                    if (msg.metrics) {
+                                        document.getElementById('liveTradeCount').textContent = msg.metrics.total_trades || 0;
+                                        document.getElementById('liveWinRate').textContent =
+                                            `${(msg.metrics.win_rate || 0).toFixed(1)}%`;
+                                        document.getElementById('liveMaxDrawdown').textContent =
+                                            `${(msg.metrics.max_drawdown_pct || 0).toFixed(2)}%`;
+                                    }
+
+                                    // Update live trades
+                                    if (msg.recent_trades && msg.recent_trades.length > 0) {
+                                        updateLiveTrades(msg.recent_trades);
+                                    }
                                 } else if (msg.type === 'result') {
                                     // Final result
                                     const result = msg.data;
                                     progressSection.classList.remove('active');
-                                    document.getElementById('realtimeMetrics').style.display = 'none';
+                                    resetLiveVisualization();
                                     resultsSection.classList.add('active');
 
                                     // Use i18n for text if available, fallback to English
@@ -1197,13 +1606,13 @@
                         console.log('Backtest cancelled by user');
                         alert('回测已停止');
                         progressSection.classList.remove('active');
-                        document.getElementById('realtimeMetrics').style.display = 'none';
+                        resetLiveVisualization();
                         updateProgress(0, 'Cancelled');
                     } else {
                         console.error('Backtest failed:', error);
                         alert(`Backtest failed: ${error.message}`);
                         progressSection.classList.remove('active');
-                        document.getElementById('realtimeMetrics').style.display = 'none';
+                        resetLiveVisualization();
                     }
                 } finally {
                     btn.disabled = false;

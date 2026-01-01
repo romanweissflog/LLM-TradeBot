@@ -485,7 +485,10 @@ async def run_backtest(config: BacktestRequest, authenticated: bool = Depends(ve
                         "percent": round(pct, 1),
                         "current_equity": kwargs.get('current_equity'),
                         "profit": kwargs.get('profit'),
-                        "profit_pct": kwargs.get('profit_pct')
+                        "profit_pct": kwargs.get('profit_pct'),
+                        "equity_point": kwargs.get('equity_point'),
+                        "recent_trades": kwargs.get('recent_trades'),
+                        "metrics": kwargs.get('metrics')
                     })
             
             # Run engine in background task

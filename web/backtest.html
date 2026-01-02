@@ -136,27 +136,53 @@
             background: linear-gradient(135deg, #dc3545, #c82333);
             color: white;
             border: none;
-            padding: 12px 30px;
+            padding: 12px 24px;
             border-radius: 8px;
             font-size: 1rem;
             font-weight: 600;
             cursor: pointer;
-            display: flex;
+            display: none;
+            /* Hidden by default */
             align-items: center;
+            justify-content: center;
             gap: 8px;
-            transition: transform 0.2s, box-shadow 0.2s;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);
+            animation: pulse-red 2s ease-in-out infinite;
         }
 
-        .stop-btn:hover {
+        .stop-btn.visible {
+            display: inline-flex !important;
+            /* Force visible when class is added */
+        }
+
+        @keyframes pulse-red {
+
+            0%,
+            100% {
+                box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);
+            }
+
+            50% {
+                box-shadow: 0 4px 20px rgba(220, 53, 69, 0.6);
+            }
+        }
+
+        .stop-btn:hover:not(:disabled) {
             transform: translateY(-2px);
-            box-shadow: 0 4px 20px rgba(220, 53, 69, 0.4);
+            box-shadow: 0 6px 24px rgba(220, 53, 69, 0.5);
             background: linear-gradient(135deg, #c82333, #bd2130);
+        }
+
+        .stop-btn:active:not(:disabled) {
+            transform: translateY(0);
         }
 
         .stop-btn:disabled {
             opacity: 0.6;
             cursor: not-allowed;
             transform: none;
+            animation: none;
         }
 
         /* Progress Section */
@@ -800,13 +826,14 @@
                     </div>
 
                     <div class="form-group" style="justify-content: flex-end;">
-                        <button class="run-btn" id="runBtn" onclick="runBacktest()" data-i18n="backtest.run">
-                            ▶️ Run Backtest
-                        </button>
-                        <button class="stop-btn" id="stopBtn" onclick="stopBacktest()"
-                            style="display: none; margin-left: 10px;">
-                            ⏹️ Stop
-                        </button>
+                        <div style="display: flex; gap: 12px; align-items: center;">
+                            <button class="run-btn" id="runBtn" onclick="runBacktest()" data-i18n="backtest.run">
+                                ▶️ Run Backtest
+                            </button>
+                            <button class="stop-btn" id="stopBtn" onclick="stopBacktest()">
+                                ⏹️ Stop
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1515,13 +1542,13 @@
                 btn.disabled = true;
                 btn.innerHTML = '<span class="spinner"></span> Running...';
 
-                // Show stop button with debug logging
+                // Show stop button with class toggle (more reliable than inline style)
                 console.log('🔍 Showing stop button...');
                 console.log('Stop button element:', stopBtn);
-                console.log('Stop button current display:', stopBtn.style.display);
-                stopBtn.style.display = 'inline-block';
+                console.log('Stop button classes before:', stopBtn.className);
+                stopBtn.classList.add('visible');
                 stopBtn.disabled = false;
-                console.log('Stop button new display:', stopBtn.style.display);
+                console.log('Stop button classes after:', stopBtn.className);
 
                 progressSection.classList.add('active');
                 resultsSection.classList.remove('active');
@@ -1545,10 +1572,15 @@
                     const reader = response.body.getReader();
                     const decoder = new TextDecoder();
                     let buffer = '';
+                    let consecutiveErrors = 0;
+                    const MAX_CONSECUTIVE_ERRORS = 5;
 
                     while (true) {
                         const { value, done } = await reader.read();
-                        if (done) break;
+                        if (done) {
+                            console.log('✅ Stream completed normally');
+                            break;
+                        }
 
                         buffer += decoder.decode(value, { stream: true });
                         const lines = buffer.split('\n');
@@ -1561,6 +1593,7 @@
 
                             try {
                                 const msg = JSON.parse(line);
+                                consecutiveErrors = 0;  // Reset error counter on successful parse
 
                                 if (msg.type === 'progress') {
                                     // Update progress bar
@@ -1638,7 +1671,15 @@
                                     throw new Error(msg.message);
                                 }
                             } catch (e) {
-                                console.error('Stream parsing error:', e, line);
+                                consecutiveErrors++;
+                                console.error(`⚠️ Stream parsing error (${consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS}):`, e);
+                                console.error('Problematic line:', line);
+
+                                // Abort if too many consecutive errors
+                                if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+                                    console.error('❌ Too many consecutive errors, aborting stream');
+                                    throw new Error(`Stream parsing failed: ${consecutiveErrors} consecutive errors`);
+                                }
                             }
                         }
                     }
@@ -1658,7 +1699,7 @@
                     }
                 } finally {
                     btn.disabled = false;
-                    stopBtn.style.display = 'none';  // Hide stop button
+                    stopBtn.classList.remove('visible');  // Hide stop button with class
                     stopBtn.disabled = true;
                     backtestAbortController = null;
                     btn.innerHTML = '▶️ Run Backtest';

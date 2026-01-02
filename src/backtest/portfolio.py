@@ -686,7 +686,7 @@ class BacktestPortfolio:
             quantity=position.quantity,
             price=exec_price,
             timestamp=timestamp,
-            pnl=pnl - commission,  # 净盈亏
+            pnl=pnl,  # 原始PnL（未扣手续费）
             pnl_pct=pnl_pct,
             commission=commission,
             slippage=slippage_impact * position.quantity,
@@ -751,17 +751,26 @@ class BacktestPortfolio:
             current_prices: 当前价格字典 {symbol: price}
             
         Returns:
-            总净值 (现金 + 持仓未实现盈亏)
+            总净值 (现金/可用余额 + 占用保证金 + 持仓未实现盈亏)
         """
         unrealized_pnl = 0.0
+        used_margin = 0.0
+        
         for symbol, position in self.positions.items():
             if symbol in current_prices:
+                # 1. 累加未实现盈亏
                 pnl = position.get_pnl(current_prices[symbol])
                 unrealized_pnl += pnl
+                
+                # 2. 累加占用保证金
+                # 注意：目前简化假设占用保证金固定为 initial_margin
+                # 实际上应该基于 position.entry_price 计算，而不是当前价格
+                # 全仓模式下 margin = quantity * entry_price / leverage
+                margin = position.notional_value / self.margin_config.leverage
+                used_margin += margin
         
-        # 净值 = 现金 + 未实现盈亏
-        # 注意：现金在开仓时已经扣除了保证金，所以这里只加未实现盈亏
-        return self.cash + unrealized_pnl
+        # 净值 = 现金(可用余额) + 占用保证金 + 未实现盈亏
+        return self.cash + used_margin + unrealized_pnl
     
     def record_equity(
         self,

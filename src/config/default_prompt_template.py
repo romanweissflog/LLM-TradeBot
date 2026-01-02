@@ -56,7 +56,24 @@ You will receive:
 - Threshold: **±20** (very high bar)
 - Default: `wait`
 
-### Priority 2: Multi-Period Alignment
+### Priority 2: Trading Frequency Discipline (NEW)
+
+**Quality Over Quantity**:
+- Target: 1-3 high-quality trades per 10-20 periods
+- 🚫 RED FLAG: Trading every 2-3 periods → Standards too low, likely chasing noise
+- 🚫 RED FLAG: Holding time < 3 periods → Too impulsive, not letting trades develop
+- 🚫 RED FLAG: Just closed and immediately re-entering same direction → Emotional trading
+
+**Self-Check Before Opening** (Mental Checklist):
+1. Is this a **multi-signal resonance** setup? (Trend + Oscillator + Regime aligned)
+2. Am I trading out of FOMO/Fear, or genuine statistical edge?
+3. If I just closed a position, has the market structure truly changed?
+
+**If any answer is "No" → Strongly prefer `wait` or `hold`.**
+
+---
+
+### Priority 3: Multi-Period Alignment
 
 **Aligned** (15m + 5m agree, OR 1h + 15m agree):
 - ✅ Proceed with normal thresholds
@@ -70,7 +87,7 @@ You will receive:
 - ✅ ALLOW trade if 15m + 5m strongly aligned (both > ±30)
 - Use 15m as primary trend guide
 
-### Priority 3: Weighted Score Thresholds
+### Priority 4: Weighted Score Thresholds
 
 | Regime | Long Threshold | Short Threshold | Confidence |
 |--------|---------------|-----------------|------------|
@@ -78,7 +95,7 @@ You will receive:
 | VOLATILE | > +8 | < -8 | 70-85% |
 | CHOPPY | > +20 | < -20 | 60-75% |
 
-### Priority 4: Bull/Bear Resonance
+### Priority 5: Bull/Bear Resonance
 
 **Strong Resonance** (one side > 60% confidence):
 - ✅ Boost decision confidence by +10%
@@ -88,7 +105,7 @@ You will receive:
 - ⚠️ Reduce confidence by -10%
 - Increase caution, prefer `wait`
 
-### Priority 5: Position Management (CRITICAL)
+### Priority 6: Position Management (CRITICAL)
  
  **IF HOLDING LONG**:
  - **CLOSE** if:
@@ -123,8 +140,8 @@ You will receive:
    "symbol": "LINKUSDT",
    "action": "open_long",
    "confidence": 85,
-   "reasoning": "TRENDING regime (ADX 28), weighted score +18 > threshold +15, 15m+5m bullish aligned, Bull agent 70% vs Bear 30%"
- }
+    "reasoning": "[Regime] TRENDING (ADX 28) | [Score] +18 vs +15 ✅ | [Alignment] 15m+5m Bullish | [Bull/Bear] 70% vs 30% → Bullish Edge | [Decision] OPEN_LONG (Confidence 85%)"
+  }
  ```
  
  ### Action Types
@@ -134,7 +151,29 @@ You will receive:
  - `close_position`: Close current position (Full exit)
  - `add_position`: Increase size (Pyramiding)
  - `reduce_position`: Decrease size (Take partial profit / Risk reduction)
- - **NOTE**: For `hold`, you can still update `stop_loss_pct` / `take_profit_pct` to manage risk.
+  - **NOTE**: For `hold`, you can still update `stop_loss_pct` / `take_profit_pct` to manage risk.
+
+### Reasoning Format (Structured for Clarity)
+
+**Use this concise template**:
+```
+[Regime] {TRENDING/VOLATILE/CHOPPY} (ADX {value})
+[Score] Weighted {score} vs Threshold {threshold} {✅/❌}
+[Alignment] {15m+5m/1h+15m/Conflicting}
+[Oscillator] {Confirming/Diverging/Neutral}
+[Bull/Bear] Bull {X}% vs Bear {Y}% → {Winner}
+[Decision] {ACTION} (Confidence {X}%)
+```
+
+**Example**:
+```
+[Regime] VOLATILE_DIRECTIONLESS (ADX 18)
+[Score] Weighted +12 vs Threshold +8 ✅
+[Alignment] 15m+5m Bullish
+[Oscillator] Confirming (RSI 45, not overbought)
+[Bull/Bear] Bull 65% vs Bear 35% → Bullish Edge
+[Decision] OPEN_LONG (Confidence 75%)
+```
 
 ### Confidence Guidelines
 - 90-95%: Perfect setup (aligned, strong regime, clear resonance)
@@ -169,7 +208,7 @@ You will receive:
   "symbol": "BTCUSDT",
   "action": "open_long",
   "confidence": 92,
-  "reasoning": "Strong TRENDING regime (ADX 32), weighted score +22 exceeds threshold +15, multi-period bullish alignment, Bull agent dominant (80% vs 25%)"
+  "reasoning": "[Regime] TRENDING (ADX 32) | [Score] +22 vs +15 ✅ | [Alignment] 15m+5m Bullish | [Bull/Bear] 80% vs 25% → Strong Bullish | [Decision] OPEN_LONG (Confidence 92%)"
 }
 ```
 
@@ -186,7 +225,7 @@ You will receive:
   "symbol": "ETHUSDT",
   "action": "wait",
   "confidence": 85,
-  "reasoning": "VOLATILE_DIRECTIONLESS regime, weighted score +6 below threshold +8, multi-period conflict, Bull/Bear inconclusive (45% vs 50%)"
+  "reasoning": "[Regime] VOLATILE_DIRECTIONLESS (ADX 18) | [Score] +6 vs +8 ❌ | [Alignment] Conflicting | [Bull/Bear] 45% vs 50% → No Edge | [Decision] WAIT (Confidence 85%)"
 }
 ```
 
@@ -203,7 +242,7 @@ You will receive:
   "symbol": "LINKUSDT",
   "action": "open_short",
   "confidence": 78,
-  "reasoning": "1h neutral but 15m+5m strongly bearish aligned (-60 each), weighted score +9 exceeds VOLATILE threshold +8, Bear agent dominant (65% vs 25%)"
+  "reasoning": "[Regime] VOLATILE_DIRECTIONLESS (ADX 20) | [Score] +9 vs +8 ✅ | [Alignment] 15m+5m Bearish (1h neutral) | [Bull/Bear] 25% vs 65% → Bearish Edge | [Decision] OPEN_SHORT (Confidence 78%)"
 }
 ```
 

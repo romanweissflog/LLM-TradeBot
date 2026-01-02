@@ -465,6 +465,17 @@ class BacktestEngine:
             log.warning(f"🚫 Confidence {confidence}% < 50% for {action}. Forcing WAIT.")
             return {'action': 'wait', 'reason': 'low_confidence_filtering'}
         
+        # 1. Volatile Regime Entry Guard
+        # Block new entries in VOLATILE_DIRECTIONLESS unless extreme oscillator reading
+        reason = decision.get('reason', '')
+        if action in ['long', 'short'] and 'VOLATILE_DIRECTIONLESS' in reason:
+            vote_details = decision.get('vote_details', {})
+            oscillator_1h = abs(vote_details.get('oscillator_1h', 0))
+            # Only allow entry if oscillator shows extreme (> 5 = RSI < 25 or > 75)
+            if oscillator_1h < 5:
+                log.warning(f"🚫 Volatile Regime Guard: {action} blocked in VOLATILE_DIRECTIONLESS (oscillator_1h={oscillator_1h:.1f} < 5)")
+                return {'action': 'wait', 'reason': 'volatile_regime_guard'}
+        
         # Normalize actions
         if action == 'open_long': action = 'long'
         if action == 'open_short': action = 'short'
@@ -514,6 +525,16 @@ class BacktestEngine:
                 return
             if action == 'close_long' and current_side != Side.LONG:
                 log.warning(f"⚠️ close_long signal but position is {current_side}, ignoring")
+                return
+            
+            # Profit Protection: Don't close winners too early
+            pos = self.portfolio.positions[symbol]
+            current_pnl_pct = pos.get_pnl_pct(current_price)
+            hold_hours = (timestamp - pos.timestamp).total_seconds() / 3600 if pos.timestamp else 0
+            
+            # If profitable AND held < 2 hours, let it run (unless trailing stop triggered)
+            if current_pnl_pct > 0 and hold_hours < 2:
+                log.info(f"🛡️ Profit Protection: +{current_pnl_pct:.2f}% profit, only {hold_hours:.1f}h held < 2h. Keeping position.")
                 return
             
             self.portfolio.close_position(

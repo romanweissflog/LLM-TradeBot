@@ -1432,6 +1432,83 @@
                 el.id = `${baseId}-tab${newTabId}`;
             });
 
+            // Reset all input values to defaults (prevent inheriting Tab 1's values)
+            newContent.querySelectorAll('input[type="text"], input[type="number"], input[type="date"]').forEach(input => {
+                // Keep the default value from HTML, not the current value from Tab 1
+                input.value = input.defaultValue || '';
+            });
+
+            // Reset all checkboxes to unchecked
+            newContent.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+                checkbox.checked = false;
+            });
+
+            // Reset all select elements to their first option
+            newContent.querySelectorAll('select').forEach(select => {
+                select.selectedIndex = 0;
+            });
+
+            // Reset UI state to idle (prevent inheriting "running" state from Tab 1)
+            // 1. Reset Run button
+            const runBtn = newContent.querySelector('[id^="runBtn"]');
+            if (runBtn) {
+                runBtn.disabled = false;
+                runBtn.innerHTML = '▶️ Run Backtest';
+            }
+
+            // 2. Hide Stop button
+            const stopBtn = newContent.querySelector('[id^="stopBtn"]');
+            if (stopBtn) {
+                stopBtn.classList.remove('visible');
+                stopBtn.disabled = true;
+            }
+
+            // 3. Hide Progress section
+            const progressSection = newContent.querySelector('[id^="progressSection"]');
+            if (progressSection) {
+                progressSection.classList.remove('active');
+            }
+
+            // 4. Hide Results section
+            const resultsSection = newContent.querySelector('[id^="resultsSection"]');
+            if (resultsSection) {
+                resultsSection.classList.remove('active');
+            }
+
+            // 5. Reset progress bar
+            const progressBar = newContent.querySelector('[id^="progressBar"]');
+            if (progressBar) {
+                progressBar.style.width = '0%';
+            }
+
+            // 6. Reset progress text
+            const progressText = newContent.querySelector('[id^="progressText"]');
+            if (progressText) {
+                progressText.textContent = '';
+            }
+
+            // 7. Hide realtime metrics
+            const realtimeMetrics = newContent.querySelector('[id^="realtimeMetrics"]');
+            if (realtimeMetrics) {
+                realtimeMetrics.style.display = 'none';
+            }
+
+            // 8. Hide live chart containers
+            const liveChartContainer = newContent.querySelector('[id^="liveChartContainer"]');
+            if (liveChartContainer) {
+                liveChartContainer.style.display = 'none';
+            }
+
+            const liveDrawdownContainer = newContent.querySelector('[id^="liveDrawdownContainer"]');
+            if (liveDrawdownContainer) {
+                liveDrawdownContainer.style.display = 'none';
+            }
+
+            const liveTradesContainer = newContent.querySelector('[id^="liveTradesContainer"]');
+            if (liveTradesContainer) {
+                liveTradesContainer.style.display = 'none';
+            }
+
             // NOW set the correct container ID (after child IDs are updated)
             newContent.id = `tab-content-${newTabId}`;
             newContent.classList.remove('active');
@@ -1441,6 +1518,9 @@
 
             // Switch to new tab
             switchTab(newTabId);
+
+            // Initialize the new tab (attach listeners, set defaults)
+            initTab(newTabId);
 
             // Update add button if max reached
             if (tabCounter >= MAX_TABS) {
@@ -1592,19 +1672,35 @@
             }
         }
 
-        // Add change listener to all checkboxes
-        document.addEventListener('DOMContentLoaded', () => {
-            // Set default dates to 1 day
+
+
+        // Initialize a specific tab
+        function initTab(tabId) {
+            // Note: We depend on currentTabId being set to tabId for some helpers if we don't pass it explicitely,
+            // but helpers like setDateRange use currentTabId implicitly.
+            // Since we call switchTab(newTabId) before initTab, this is safe.
+
+            // 1. Set default date range
+            // This ensures inputs are populated even if cloneNode didn't copy values
             setDateRange(1);
 
-            // Add change listeners to checkboxes
-            // Note: This only attaches to the initial static tab (Tab 1)
-            // Functionality for dynamic tabs is handled by the scoped functions
-            const gridId = getScopedId('symbolGrid');
-            document.querySelectorAll(`#${gridId} input[type="checkbox"]`).forEach(cb => {
+            // 2. Add change listeners to checkboxes
+            const gridId = getScopedId('symbolGrid', tabId);
+            const checkboxes = document.querySelectorAll(`#${gridId} input[type="checkbox"]`);
+            checkboxes.forEach(cb => {
+                // Remove potential existing listeners (though clean clones shouldn't have them) just in case
+                cb.removeEventListener('change', updateSelectedCount);
                 cb.addEventListener('change', updateSelectedCount);
             });
+
+            // 3. Update selected count for this tab
             updateSelectedCount();
+        }
+
+        // Add change listener to all checkboxes
+        document.addEventListener('DOMContentLoaded', () => {
+            // Initialize the first tab
+            initTab(1);
 
             // Render history
             renderHistory();
@@ -2023,11 +2119,12 @@
             if (tbody) tbody.innerHTML = '';
         }
 
-        let backtestAbortController = null;
+        // Abort controllers are now stored per-tab in backtestTabs Map
 
         function stopBacktest() {
-            if (backtestAbortController) {
-                backtestAbortController.abort();
+            const tabState = backtestTabs.get(currentTabId);
+            if (tabState && tabState.controller) {
+                tabState.controller.abort();
                 // UI reset is handled in the catch block of runBacktest
             }
         }
@@ -2039,8 +2136,13 @@
             const progressSection = getScopedElement('progressSection', activeTabId);
             const resultsSection = getScopedElement('resultsSection', activeTabId);
 
-            // Create new AbortController
-            backtestAbortController = new AbortController();
+            // Create new AbortController for this tab
+            const tabState = backtestTabs.get(activeTabId);
+            if (!tabState) {
+                console.error('Tab state not found for tabId:', activeTabId);
+                return;
+            }
+            tabState.controller = new AbortController();
 
             // Get selected symbols (helper needs update, but we can just use scoped query here or rely on currentTabId matching since we're in the start block)
             // But selectPreset etc affect current tab. runBacktest reads form.
@@ -2110,7 +2212,7 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(config),
-                    signal: backtestAbortController.signal  // Add abort signal
+                    signal: tabState.controller.signal  // Add abort signal
                 });
 
                 if (!response.ok) {
@@ -2251,7 +2353,7 @@
                 btn.disabled = false;
                 stopBtn.classList.remove('visible');  // Hide stop button with class
                 stopBtn.disabled = true;
-                backtestAbortController = null;
+                if (tabState) tabState.controller = null;
                 btn.innerHTML = '▶️ Run Backtest';
                 // Re-apply language to button text
                 if (window.applyLanguage) window.applyLanguage();

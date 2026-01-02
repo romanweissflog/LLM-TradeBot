@@ -92,10 +92,10 @@ You will receive:
    - If `VOLATILE` or `CHOPPY` (ADX < 25) → **Trust Oscillator** (Mean Reversion Opportunity).
 
 2. **Actionable Logic**:
-   - Case A: Bearish Trend + RSI < 25 + Volatile/Choppy Regime
-     → **OPEN_LONG** (Catch the bounce). Use tight SL.
-   - Case B: Bullish Trend + RSI > 75 + Volatile/Choppy Regime
-     → **OPEN_SHORT** (Fade the rally). Use tight SL.
+   - Case A: Bearish Trend + RSI < 30 + Volatile/Choppy Regime
+     → **STRONG LONG** (Catch the bounce). Target 1h Trend Reversal.
+   - Case B: Bullish Trend + RSI > 70 + Volatile/Choppy Regime
+     → **STRONG SHORT** (Fade the rally). Use tight SL.
 
 **Do NOT just `wait` because signals conflict. Analyze the Regime to break the tie.**
 
@@ -118,7 +118,7 @@ You will receive:
 | Regime | Long Threshold | Short Threshold | Confidence |
 |--------|---------------|-----------------|------------|
 | TRENDING | > +15 | < -15 | 85-95% |
-| VOLATILE | > +6 | < -6 | 70-85% |
+| VOLATILE | > +5 | < -5 | 70-85% |
 | CHOPPY | > +20 | < -20 | 60-75% |
 
 ### Priority 7: Bull/Bear Resonance
@@ -191,8 +191,22 @@ You will receive:
 | Losing (<-5%) | 0h | Immediate close |
 
 **Rationale**: Markets are dynamic. Extended holds = missed opportunities + amplified losses.
- 
- ---
+
+### Priority 11: Profit Maximization (Aggressive Growth - NEW)
+
+**Capitalize on Winning Positions**:
+
+1. **Pyramiding (Adding to Winners)**:
+   - **Trigger**: PnL > +1.5% AND Trend Score strengthens (> +25).
+   - **Action**: `add_position`
+   - **Limit**: Max 2 additions. Don't add if resisting major level.
+
+2. **Trailing Stop Simulation**:
+   - If PnL > +3% → Move SL to +1.5% (Lock Profit).
+   - If PnL > +5% → Move SL to +3% (Trailing).
+   - *Instruction*: Update `stop_loss_pct` in `hold` decision output relative to current price.
+
+---
  
  ## 📋 OUTPUT FORMAT
  

@@ -321,8 +321,8 @@ class BacktestAgentRunner:
                  'side': side_str,
                  'entry_price': pos.entry_price,
                  'quantity': pos.quantity,
-                 'unrealized_pnl': pos.unrealized_pnl_pct * pos.entry_price * pos.quantity / 100, # Approx
-                 'pnl_pct': pos.unrealized_pnl_pct,
+                 'unrealized_pnl': pos.get_pnl(current_price), 
+                 'pnl_pct': pos.get_pnl_pct(current_price),
                  'leverage': 1 # Default or from pos
              }
 

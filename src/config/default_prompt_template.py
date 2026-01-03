@@ -85,10 +85,14 @@ You will receive:
   - *Exception:* Allow if ADX > 40 (Parabolic Run)
   - *Action:* If signal says Long but RSI > 75 → Convert to `wait`
 
-**SHORT Trade Enablement (NEW - Address zero SHORT issue):**
+**SHORT Trade Enablement (PHASE 2 - MANDATORY):**
 - In VOLATILE markets, actively seek SHORT when weighted score < -5
 - Do NOT default to LONG just because trend is unclear
 - Bear agent with 55%+ confidence should trigger SHORT consideration
+- **MANDATORY SHORT CHECK:**
+  - If oscillator_1h score < -30 AND trend_1h score < 0 → MUST output SHORT (confidence ≥60%)
+  - If 15m+1h both bearish aligned (< -60) → Output SHORT regardless of ADX
+  - Do NOT output LONG when 1h trend is negative (score < 0)
 
 ### Priority 4: Handling Conflicting Signals (Mean Reversion Strategy)
 
@@ -143,8 +147,9 @@ You will receive:
  **IF HOLDING LONG**:
  - **CLOSE** if:
      - Weighted Score drops < -10 (Trend Reversal)
-     - Bear Agent > 65% Confidence
+     - Bear Agent > 75% Confidence (was 65%, now stricter to prevent early exits)
      - Regime shifts to CHOPPY with negative bias
+     - **ONLY close for "preserve capital" if PnL < -2%** (NEW)
  - **ADD** if:
      - Trend strengthens (Score > +30) and 15m/1h Aligned
      - Bull Agent > 80% Confidence

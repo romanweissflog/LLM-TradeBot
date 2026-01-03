@@ -519,15 +519,21 @@ class BacktestEngine:
                 log.warning(f"⚠️ close_long signal but position is {current_side}, ignoring")
                 return
             
-            # Profit Protection: Don't close winners too early
+            # PHASE 2: Enforce Minimum Hold Time (3h) - Hard Block
             pos = self.portfolio.positions[symbol]
             current_pnl_pct = pos.get_pnl_pct(current_price)
             hold_hours = (timestamp - pos.entry_time).total_seconds() / 3600 if pos.entry_time else 0
             
-            # If profitable AND held < 2 hours, let it run (unless trailing stop triggered)
-            if current_pnl_pct > 0 and hold_hours < 2:
-                log.info(f"🛡️ Profit Protection: +{current_pnl_pct:.2f}% profit, only {hold_hours:.1f}h held < 2h. Keeping position.")
-                return
+            # Hard minimum hold: Block ALL closes before 3h unless severe loss
+            if hold_hours < 3:
+                # Only allow close if: (a) losing > 5%, or (b) reason contains stop_loss/trailing
+                close_reason = decision.get('reason', '').lower()
+                is_stop_loss = 'stop_loss' in close_reason or 'trailing' in close_reason
+                is_severe_loss = current_pnl_pct < -5.0
+                
+                if not is_stop_loss and not is_severe_loss:
+                    log.info(f"🛡️ HOLD ENFORCEMENT: {hold_hours:.1f}h < 3h min hold. PnL={current_pnl_pct:+.2f}%. Blocking close.")
+                    return
             
             self.portfolio.close_position(
                 symbol=symbol,

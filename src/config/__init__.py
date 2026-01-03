@@ -63,18 +63,23 @@ class Config:
             self._config['llm'] = {}
         
         # API Keys for each provider
+        # 支持 ANTHROPIC_API_KEY 作为 CLAUDE_API_KEY 的别名（优先级更高）
+        claude_api_key = os.getenv('ANTHROPIC_API_KEY') or os.getenv('CLAUDE_API_KEY')
+        
         llm_api_keys = {
             'openai': os.getenv('OPENAI_API_KEY'),
             'deepseek': os.getenv('DEEPSEEK_API_KEY'),
-            'claude': os.getenv('CLAUDE_API_KEY'),
+            'claude': claude_api_key,
             'qwen': os.getenv('QWEN_API_KEY'),
             'gemini': os.getenv('GEMINI_API_KEY'),
         }
         self._config['llm']['api_keys'] = {k: v for k, v in llm_api_keys.items() if v}
         
         # Custom base URL (for proxies)
-        if os.getenv('LLM_BASE_URL'):
-            self._config['llm']['base_url'] = os.getenv('LLM_BASE_URL')
+        # 支持 ANTHROPIC_BASE_URL 作为 LLM_BASE_URL 的别名（优先级更高）
+        base_url = os.getenv('ANTHROPIC_BASE_URL') or os.getenv('LLM_BASE_URL')
+        if base_url:
+            self._config['llm']['base_url'] = base_url
     
     def get(self, key_path: str, default=None):
         """

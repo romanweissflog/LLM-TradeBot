@@ -522,7 +522,7 @@ class BacktestEngine:
             # Profit Protection: Don't close winners too early
             pos = self.portfolio.positions[symbol]
             current_pnl_pct = pos.get_pnl_pct(current_price)
-            hold_hours = (timestamp - pos.timestamp).total_seconds() / 3600 if pos.timestamp else 0
+            hold_hours = (timestamp - pos.entry_time).total_seconds() / 3600 if pos.entry_time else 0
             
             # If profitable AND held < 2 hours, let it run (unless trailing stop triggered)
             if current_pnl_pct > 0 and hold_hours < 2:

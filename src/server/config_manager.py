@@ -3,11 +3,17 @@ import re
 from typing import Dict, Any, Optional
 
 class ConfigManager:
+    # Runtime storage for Railway deployments (in-memory, not persisted)
+    _runtime_config: Dict[str, str] = {}
+    
     def __init__(self, root_dir: str):
         self.root_dir = root_dir
         self.env_path = os.path.join(root_dir, '.env')
         self.config_dir = os.path.join(root_dir, 'config')
         self.prompt_path = os.path.join(self.config_dir, 'custom_prompt.md')
+        
+        # Check if running on Railway
+        self.is_railway = bool(os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("RAILWAY_PROJECT_ID"))
         
     def get_config(self) -> Dict[str, Any]:
         """Read config from .env and return structured dict"""
@@ -45,13 +51,9 @@ class ConfigManager:
             }
         }
 
-    def update_config(self, updates: Dict[str, Any]) -> bool:
-        """Update .env file with new values"""
+    def update_config(self, updates: Dict[str, Any], railway_mode: bool = False) -> bool:
+        """Update configuration. On Railway, applies to runtime environment only."""
         try:
-            if not os.path.exists(self.env_path):
-                print(f"[ConfigManager] .env file not found at: {self.env_path}")
-                return False
-                
             # Map frontend keys to .env keys
             key_map = {
                 "binance_api_key": "BINANCE_API_KEY",
@@ -80,7 +82,23 @@ class ConfigManager:
                         flat_updates[key_map[k]] = str(v)
 
             if not flat_updates:
-                return True # Nothing to update
+                return True  # Nothing to update
+            
+            # === Railway Mode: Apply to runtime environment ===
+            if railway_mode or self.is_railway:
+                for key, val in flat_updates.items():
+                    # Store in runtime config
+                    ConfigManager._runtime_config[key] = val
+                    # Also apply to os.environ for immediate effect
+                    os.environ[key] = val
+                
+                print(f"[ConfigManager] Runtime config applied (Railway mode): {list(flat_updates.keys())}")
+                return True
+            
+            # === Local Mode: Update .env file ===
+            if not os.path.exists(self.env_path):
+                print(f"[ConfigManager] .env file not found at: {self.env_path}")
+                return False
                 
             # Read all lines
             with open(self.env_path, 'r', encoding='utf-8') as f:

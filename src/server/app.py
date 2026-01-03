@@ -296,19 +296,18 @@ async def get_prompt_content(authenticated: bool = Depends(verify_auth)):
 
 @app.post("/api/config")
 async def update_config_endpoint(data: dict = Body(...), authenticated: bool = Depends(verify_admin)):
-    """Update .env configuration"""
-    success = config_manager.update_config(data)
+    """Update configuration. On Railway, applies to runtime environment only."""
+    success = config_manager.update_config(data, railway_mode=IS_RAILWAY)
     if success:
-        return {"status": "success", "message": "Configuration updated. Please restart the bot if you changed API keys."}
-    else:
-        # Check if running on Railway where .env file doesn't exist
         if IS_RAILWAY:
-            raise HTTPException(
-                status_code=400, 
-                detail="⚠️ Railway deployment: Please configure environment variables directly in Railway Dashboard → Variables tab. File-based config is read-only on cloud platforms."
-            )
+            return {
+                "status": "success", 
+                "message": "✅ Configuration applied to runtime! Note: Changes will take effect immediately but won't persist after Railway redeploys. For permanent settings, add them to Railway Dashboard → Variables."
+            }
         else:
-            raise HTTPException(status_code=500, detail="Failed to update configuration")
+            return {"status": "success", "message": "Configuration updated. Please restart the bot if you changed API keys."}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to update configuration")
 
 @app.post("/api/config/prompt")
 async def update_prompt_text(data: dict = Body(...), authenticated: bool = Depends(verify_admin)):

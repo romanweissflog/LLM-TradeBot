@@ -59,6 +59,12 @@ function updateLanguageButton() {
 let equityChart = null;
 
 function initChart() {
+    // Destroy existing chart if it exists to prevent "Canvas is already in use" error
+    if (equityChart) {
+        equityChart.destroy();
+        equityChart = null;
+    }
+
     const ctx = document.getElementById('equityChart').getContext('2d');
     equityChart = new Chart(ctx, {
         type: 'line',

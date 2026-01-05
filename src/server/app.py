@@ -263,6 +263,18 @@ async def control_bot(cmd: ControlCommand, authenticated: bool = Depends(verify_
         "demo_expired": global_state.demo_expired
     }
 
+@app.post("/api/test_log")
+async def test_log(authenticated: bool = Depends(verify_auth)):
+    """Test endpoint to inject logs for debugging"""
+    from src.utils.logger import log
+    global_state.add_log("[🧪 TEST] Manual test log from API")
+    log.info("[🧪 TEST] Test log via logger")
+    return {
+        "status": "success",
+        "logs_count": len(global_state.recent_logs),
+        "latest_logs": global_state.recent_logs[-5:] if global_state.recent_logs else []
+    }
+
 @app.post("/api/upload_prompt")
 async def upload_prompt(file: UploadFile = File(...), authenticated: bool = Depends(verify_admin)):
     try:

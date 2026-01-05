@@ -246,10 +246,7 @@ class SharedState:
         """Register a sink to capture all system logs to dashboard"""
         def sink(message):
             record = message.record
-            # Skip logs that are already explicitly for dashboard (avoid duplicates/loops)
-            if record["extra"].get("dashboard"):
-                return
-                
+            
             # Format: YYYY-MM-DD HH:mm:ss | LEVEL | module:func - message
             time_str = record["time"].strftime("%Y-%m-%d %H:%M:%S")
             level = record["level"].name
@@ -259,7 +256,7 @@ class SharedState:
             
             formatted = f"{time_str} | {level:<8} | {module}:{func} - {msg}"
             
-            # Directly append to recent_logs (bypass add_log to avoid re-logging)
+            # Directly append to recent_logs
             self.recent_logs.append(formatted)
             if len(self.recent_logs) > 500:
                 self.recent_logs.pop(0)

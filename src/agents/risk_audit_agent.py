@@ -164,18 +164,57 @@ class RiskAuditAgent:
             if r_type == 'choppy' and confidence < 80:
                 return self._block_decision('total_blocks', f"震荡市信心不足({confidence:.1f} < 80)，拦截开仓")
 
+        regime_name = str((decision.get('regime') or {}).get('regime', '')).lower()
+        trend_scores = decision.get('trend_scores') or {}
+        t_1h = trend_scores.get('trend_1h_score')
+        t_15m = trend_scores.get('trend_15m_score')
+        osc_scores = decision.get('oscillator_scores') or decision.get('oscillator') or {}
+        osc_values = [
+            osc_scores.get('osc_1h_score'),
+            osc_scores.get('osc_15m_score'),
+            osc_scores.get('osc_5m_score')
+        ]
+        osc_values = [v for v in osc_values if isinstance(v, (int, float))]
+        osc_min = min(osc_values) if osc_values else None
+        long_strong_setup = False
+        if is_long and osc_min is not None and isinstance(t_1h, (int, float)) and isinstance(t_15m, (int, float)):
+            if t_1h >= 60 and t_15m >= 20 and osc_min > -20 and 'downtrend' not in regime_name:
+                long_strong_setup = True
+        short_strong_setup = False
+        if is_short and isinstance(t_1h, (int, float)) and isinstance(t_15m, (int, float)) and osc_min is not None:
+            if t_1h <= -60 and t_15m <= -20 and osc_min <= -40 and 'uptrend' not in regime_name:
+                short_strong_setup = True
+        symbol = decision.get('symbol')
+        symbol_upper = str(symbol).upper() if symbol else ""
+        if symbol_upper == "FILUSDT":
+            if is_short:
+                return self._block_decision('total_blocks', "FILUSDT策略收紧：禁止做空")
+            if is_long and not long_strong_setup:
+                return self._block_decision('total_blocks', "FILUSDT策略收紧：做多需1h强趋势与15m确认")
+
         # 0.3 价格位置拦截 (Position Filter)
         if position:
             pos_pct = position.get('position_pct', 50)
             location = position.get('location')
+            pos_1h = decision.get('position_1h') if isinstance(decision.get('position_1h'), dict) else None
+            short_pos_pct = pos_pct
+            if pos_1h and isinstance(pos_1h.get('position_pct'), (int, float)):
+                short_pos_pct = pos_1h.get('position_pct', pos_pct)
+            short_pos_threshold = 75 if not short_strong_setup else 60
+
             if location == 'middle' or 40 <= pos_pct <= 60:
-                return self._block_decision('total_blocks', f"价格处于区间中部({pos_pct:.1f}%)，R/R极差，禁止开仓")
+                if not ((is_short and short_strong_setup and short_pos_pct >= short_pos_threshold) or (is_long and long_strong_setup)):
+                    return self._block_decision('total_blocks', f"价格处于区间中部({pos_pct:.1f}%)，R/R极差，禁止开仓")
             
             if is_long and pos_pct > 70:
                 return self._block_decision('total_blocks', f"做多位置过高({pos_pct:.1f}%)，存在回调风险")
             
-            if is_short and pos_pct < 70:
-                return self._block_decision('total_blocks', f"做空位置偏低({pos_pct:.1f}%)，避免在非阻力区做空")
+            if is_short and short_pos_pct < short_pos_threshold:
+                return self._block_decision('total_blocks', f"做空位置偏低({short_pos_pct:.1f}%)，需接近1h阻力带(≥{short_pos_threshold:.0f}%)")
+
+        # 0.35 方向不明时的做多收紧 (Volatile Directionless Guard)
+        if regime_name == 'volatile_directionless' and is_long and not long_strong_setup:
+            return self._block_decision('total_blocks', "方向不明(volatile_directionless)，做多需更强趋势确认")
 
         # 0.5 震荡指标冲突拦截 (Overbought/Oversold Guard)
         osc_scores = decision.get('oscillator_scores') or decision.get('oscillator') or {}
@@ -203,7 +242,7 @@ class RiskAuditAgent:
             # 若缺少趋势分数，则跳过此规则
             if isinstance(t_1h, (int, float)) and t_1h > -60:
                 return self._block_decision('total_blocks', f"空头趋势不足(1h={t_1h:+.0f})，避免逆势做空")
-            if isinstance(t_15m, (int, float)) and t_15m > -40:
+            if isinstance(t_15m, (int, float)) and t_15m > -20:
                 return self._block_decision('total_blocks', f"空头趋势不足(15m={t_15m:+.0f})，避免逆势做空")
             # Regime 反向过滤 (仅在可识别趋势时启用)
             regime = decision.get('regime') or {}

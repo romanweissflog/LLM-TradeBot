@@ -310,6 +310,19 @@ class BacktestAgentRunner:
                         atr_pct = float(atr / close * 100)
                 except Exception:
                     atr_pct = None
+            position_1h = None
+            df_1h = snapshot.stable_1h
+            if df_1h is not None and len(df_1h) > 5:
+                try:
+                    from src.agents.position_analyzer import PositionAnalyzer
+                    analyzer = PositionAnalyzer()
+                    position_1h = analyzer.analyze_position(
+                        df_1h,
+                        snapshot.live_5m.get('close', 0),
+                        timeframe='1h'
+                    )
+                except Exception:
+                    position_1h = None
 
             # 4. Format result
             return {
@@ -324,7 +337,8 @@ class BacktestAgentRunner:
                 'position': position_info,
                 'oscillator_scores': osc_scores,
                 'trend_scores': trend_scores,
-                'atr_pct': atr_pct
+                'atr_pct': atr_pct,
+                'position_1h': position_1h
             }
             
         except Exception as e:

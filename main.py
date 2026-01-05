@@ -1293,6 +1293,7 @@ class MultiAgentTradingBot:
                 current_price=current_price,
                 confidence=vote_result.confidence
             )
+            order_params['symbol'] = self.current_symbol
             
             print(f"  ✅ 信号方向: {vote_result.action}")
             print(f"  ✅ 综合信心: {vote_result.confidence:.1f}%")
@@ -1317,6 +1318,18 @@ class MultiAgentTradingBot:
                 'trend_15m_score': trend_data.get('trend_15m_score', 0),
                 'trend_5m_score': trend_data.get('trend_5m_score', 0)
             }
+            try:
+                from src.agents.position_analyzer import PositionAnalyzer
+                df_1h = processed_dfs.get('1h')
+                if df_1h is not None and len(df_1h) > 5:
+                    analyzer = PositionAnalyzer()
+                    order_params['position_1h'] = analyzer.analyze_position(
+                        df_1h,
+                        current_price,
+                        timeframe='1h'
+                    )
+            except Exception:
+                pass
             
             # Step 5 (Embedded in Step 4 for clean output)
             

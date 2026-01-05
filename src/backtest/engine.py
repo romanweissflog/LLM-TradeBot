@@ -598,6 +598,7 @@ class BacktestEngine:
                 )
 
             audit_decision = {
+                'symbol': symbol,
                 'action': action,
                 'entry_price': current_price,
                 'stop_loss': stop_loss,
@@ -607,6 +608,7 @@ class BacktestEngine:
                 'confidence': confidence,
                 'regime': decision.get('regime'),
                 'position': decision.get('position'),
+                'position_1h': decision.get('position_1h'),
                 'oscillator_scores': osc_scores,
                 'trend_scores': decision.get('trend_scores')
             }

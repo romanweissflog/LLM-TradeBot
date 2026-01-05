@@ -134,6 +134,9 @@ class RiskAuditAgent:
         corrections = {}
         
         action = decision.get('action', 'hold')
+        action_lower = action.lower() if isinstance(action, str) else 'hold'
+        is_long = action_lower in ['long', 'open_long']
+        is_short = action_lower in ['short', 'open_short']
         
         # 0. 如果是hold，直接通过
         if action == 'hold':
@@ -168,11 +171,27 @@ class RiskAuditAgent:
             if location == 'middle' or 40 <= pos_pct <= 60:
                 return self._block_decision('total_blocks', f"价格处于区间中部({pos_pct:.1f}%)，R/R极差，禁止开仓")
             
-            if action == 'long' and pos_pct > 70:
+            if is_long and pos_pct > 70:
                 return self._block_decision('total_blocks', f"做多位置过高({pos_pct:.1f}%)，存在回调风险")
             
-            if action == 'short' and pos_pct < 30:
+            if is_short and pos_pct < 30:
                 return self._block_decision('total_blocks', f"做空位置过低({pos_pct:.1f}%)，存在反弹风险")
+
+        # 0.5 震荡指标冲突拦截 (Overbought/Oversold Guard)
+        osc_scores = decision.get('oscillator_scores') or decision.get('oscillator') or {}
+        osc_values = [
+            osc_scores.get('osc_1h_score'),
+            osc_scores.get('osc_15m_score'),
+            osc_scores.get('osc_5m_score')
+        ]
+        osc_values = [v for v in osc_values if isinstance(v, (int, float))]
+        if osc_values:
+            osc_min = min(osc_values)
+            osc_max = max(osc_values)
+            if is_long and osc_min <= -40:
+                return self._block_decision('total_blocks', f"震荡指标强烈超买({osc_min:.0f})，避免追高做多")
+            if is_short and osc_max >= 40:
+                return self._block_decision('total_blocks', f"震荡指标强烈超卖({osc_max:.0f})，避免追低做空")
 
         # 0.4 盈亏比硬核检查 (R/R Ratio)
         entry_price = decision.get('entry_price', current_price)

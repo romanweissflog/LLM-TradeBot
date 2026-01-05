@@ -18,6 +18,7 @@ from src.backtest.data_replay import DataReplayAgent
 from src.backtest.portfolio import BacktestPortfolio, Side, Trade
 from src.backtest.metrics import PerformanceMetrics, MetricsResult
 from src.backtest.report import BacktestReport
+from src.agents.risk_audit_agent import RiskAuditAgent, PositionInfo
 from src.utils.logger import log
 
 
@@ -192,6 +193,7 @@ class BacktestEngine:
         self.data_replay: Optional[DataReplayAgent] = None
         self.portfolio: Optional[BacktestPortfolio] = None
         self.agent_runner = None
+        self.risk_audit = RiskAuditAgent(max_leverage=self.config.leverage)
         
         # Initialize Agent Runner if needed
         if config.strategy_mode == "agent":
@@ -546,32 +548,16 @@ class BacktestEngine:
 
         if action in ['long', 'short']:
             side = Side.LONG if action == 'long' else Side.SHORT
-            
-            # 处理反向持仓 (Reversal)
-            if has_position:
-                current_side = self.portfolio.positions[symbol].side
-                if current_side != side:
-                    # 反向信号，先平仓
-                    self.portfolio.close_position(
-                        symbol=symbol,
-                        price=current_price,
-                        timestamp=timestamp,
-                        reason='reverse_signal'
-                    )
-                    has_position = False # 标记为无持仓，以便下面执行开仓
-            
-            # 执行开/加仓 (Open / Add)
-            # 此时我们要么是无持仓(New/Reversal)，要么是同向持仓(Add)
-            
-            # --- 复制之前的动态参数逻辑 ---
+
+            # --- 动态参数逻辑 ---
             params = decision.get('trade_params') or {}
             leverage = params.get('leverage') or self.config.leverage
             sl_pct = params.get('stop_loss_pct') or self.config.stop_loss_pct
             tp_pct = params.get('take_profit_pct') or self.config.take_profit_pct
             trailing_pct = params.get('trailing_stop_pct')
-            
+
             available_cash = self.portfolio.cash
-            
+
             if params.get('position_size_pct', 0) > 0:
                 use_cash = available_cash * (params['position_size_pct'] / 100)
                 target_position_value = use_cash * leverage
@@ -586,13 +572,73 @@ class BacktestEngine:
                     self.config.max_position_size * leverage,
                     available_cash * 0.95
                 )
-            
-            # 如果是加仓，检查是否超过总上限 (Portfolio.open_position 通常处理增加，但我们需要控制总量)
-            # 简化起见，我们假设 position_size 是本次下单量 (Incremental)
-            # 对于 "Add"，Agent通常意味着 "Add X amount". 
-            
+
             quantity = position_size / current_price
-            
+            stop_loss = current_price * (1 - sl_pct / 100) if action == 'long' else current_price * (1 + sl_pct / 100)
+            take_profit = current_price * (1 + tp_pct / 100) if action == 'long' else current_price * (1 - tp_pct / 100)
+
+            osc_scores = decision.get('oscillator_scores')
+            if not osc_scores and decision.get('vote_details'):
+                vote_details = decision.get('vote_details', {})
+                osc_scores = {
+                    'osc_1h_score': vote_details.get('oscillator_1h'),
+                    'osc_15m_score': vote_details.get('oscillator_15m'),
+                    'osc_5m_score': vote_details.get('oscillator_5m')
+                }
+
+            current_position = None
+            if has_position:
+                pos = self.portfolio.positions[symbol]
+                current_position = PositionInfo(
+                    symbol=symbol,
+                    side=pos.side.value,
+                    entry_price=pos.entry_price,
+                    quantity=pos.quantity,
+                    unrealized_pnl=pos.get_pnl(current_price)
+                )
+
+            audit_decision = {
+                'action': action,
+                'entry_price': current_price,
+                'stop_loss': stop_loss,
+                'take_profit': take_profit,
+                'quantity': quantity,
+                'leverage': leverage,
+                'confidence': confidence,
+                'regime': decision.get('regime'),
+                'position': decision.get('position'),
+                'oscillator_scores': osc_scores
+            }
+
+            audit_result = await self.risk_audit.audit_decision(
+                decision=audit_decision,
+                current_position=current_position,
+                account_balance=available_cash,
+                current_price=current_price,
+                atr_pct=None
+            )
+
+            if not audit_result.passed:
+                log.warning(f"🛡️ RiskAudit BLOCKED: {audit_result.blocked_reason}")
+                return {'action': 'hold', 'reason': audit_result.blocked_reason}
+
+            if audit_result.corrections and 'stop_loss' in audit_result.corrections:
+                stop_loss = audit_result.corrections['stop_loss']
+                sl_pct = abs(current_price - stop_loss) / current_price * 100
+
+            # 处理反向持仓 (Reversal)
+            if has_position:
+                current_side = self.portfolio.positions[symbol].side
+                if current_side != side:
+                    # 反向信号，先平仓
+                    self.portfolio.close_position(
+                        symbol=symbol,
+                        price=current_price,
+                        timestamp=timestamp,
+                        reason='reverse_signal'
+                    )
+                    has_position = False # 标记为无持仓，以便下面执行开仓
+
             if quantity > 0:
                 self.portfolio.open_position(
                     symbol=symbol,

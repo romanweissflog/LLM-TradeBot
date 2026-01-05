@@ -1305,6 +1305,12 @@ class MultiAgentTradingBot:
             order_params['regime'] = vote_result.regime
             order_params['position'] = vote_result.position
             order_params['confidence'] = vote_result.confidence
+            osc_data = quant_analysis.get('oscillator', {}) if isinstance(quant_analysis, dict) else {}
+            order_params['oscillator_scores'] = {
+                'osc_1h_score': osc_data.get('osc_1h_score', 0),
+                'osc_15m_score': osc_data.get('osc_15m_score', 0),
+                'osc_5m_score': osc_data.get('osc_5m_score', 0)
+            }
             
             # Step 5 (Embedded in Step 4 for clean output)
             

@@ -284,6 +284,15 @@ class BacktestAgentRunner:
             else:
                 final_decision = vote_result
             
+            osc_data = quant_analysis.get('oscillator', {})
+            osc_scores = {
+                'osc_1h_score': osc_data.get('osc_1h_score', 0),
+                'osc_15m_score': osc_data.get('osc_15m_score', 0),
+                'osc_5m_score': osc_data.get('osc_5m_score', 0)
+            }
+            regime_info = getattr(final_decision, 'regime', None) or getattr(vote_result, 'regime', None)
+            position_info = getattr(final_decision, 'position', None) or getattr(vote_result, 'position', None)
+
             # 4. Format result
             return {
                 'action': final_decision.action,
@@ -292,7 +301,10 @@ class BacktestAgentRunner:
                 'vote_details': getattr(final_decision, 'vote_details', {}),
                 'weighted_score': getattr(final_decision, 'weighted_score', 0),
                 'llm_enhanced': self.llm_engine is not None,
-                'trade_params': getattr(final_decision, 'trade_params', None)
+                'trade_params': getattr(final_decision, 'trade_params', None),
+                'regime': regime_info,
+                'position': position_info,
+                'oscillator_scores': osc_scores
             }
             
         except Exception as e:

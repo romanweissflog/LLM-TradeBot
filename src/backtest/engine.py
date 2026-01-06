@@ -184,7 +184,7 @@ class BacktestEngine:
         
         Args:
             config: 回测配置
-            strategy_fn: 策略函数，接收 (snapshot, portfolio) 返回 {'action': 'long/short/hold', 'confidence': 0-1}
+            strategy_fn: 策略函数，接收 (snapshot, portfolio) 返回 {'action': 'long/short/hold', 'confidence': 0-100}
         """
         self.config = config
         self.strategy_fn = strategy_fn or self._default_strategy
@@ -213,7 +213,7 @@ class BacktestEngine:
         运行完整回测
         
         Args:
-            progress_callback: 进度回调函数 (current, total, pct)
+            progress_callback: 进度回调函数 (data: dict)
             
         Returns:
             BacktestResult 对象
@@ -279,16 +279,20 @@ class BacktestEngine:
                 if liquidated:
                     log.warning(f"⚠️ Positions liquidated: {liquidated}")
                     continue  # 强平后跳过本轮策略执行
-                
-                # 检查止损止盈
-                self.portfolio.check_stop_loss_take_profit(prices, timestamp)
-                
+
                 # 执行策略
                 decision = await self._execute_strategy(snapshot, current_price)
                 self.decisions.append(decision)
                 
                 # 执行交易
                 await self._execute_decision(decision, current_price, timestamp)
+
+                # Intrabar SL/TP after decisions using bar high/low
+                bar = snapshot.live_5m if isinstance(snapshot.live_5m, dict) else {}
+                self.portfolio.check_stop_loss_take_profit_intrabar(
+                    {self.config.symbol: bar},
+                    timestamp
+                )
                 
                 # 记录净值 (OPTIMIZATION: Sample every 12 steps or on key events)
                 should_record_equity = (i % 12 == 0) or (i == total - 1) or (decision['action'] != 'hold')
@@ -460,6 +464,8 @@ class BacktestEngine:
         """执行交易决策"""
         action = decision.get('action', 'hold')
         confidence = decision.get('confidence', 0.0)
+        if isinstance(confidence, (int, float)) and 0 < confidence <= 1:
+            confidence *= 100
         
         # 0. Global Safety Check: Minimum Confidence 50%
         # Filters out weak mechanical signals when LLM yields (0% confidence)
@@ -567,11 +573,10 @@ class BacktestEngine:
                     self.config.max_position_size * leverage
                 )
             else:
-                # 默认逻辑
-                position_size = min(
-                    self.config.max_position_size * leverage,
-                    available_cash * 0.95
-                )
+                # 默认逻辑：与实盘一致（最大30%，按置信度缩放）
+                base_position_pct = 0.30
+                position_pct = base_position_pct * (confidence / 100)
+                position_size = available_cash * position_pct
 
             quantity = position_size / current_price
             stop_loss = current_price * (1 - sl_pct / 100) if action == 'long' else current_price * (1 + sl_pct / 100)
@@ -706,20 +711,20 @@ class BacktestEngine:
             if has_position:
                 current_side = portfolio.positions[symbol].side
                 if current_side == Side.SHORT:
-                    return {'action': 'long', 'confidence': 0.7, 'reason': 'golden_cross_reverse'}
-                return {'action': 'hold', 'confidence': 0.5, 'reason': 'already_long'}
-            return {'action': 'long', 'confidence': 0.7, 'reason': 'golden_cross'}
+                    return {'action': 'long', 'confidence': 70.0, 'reason': 'golden_cross_reverse'}
+                return {'action': 'hold', 'confidence': 50.0, 'reason': 'already_long'}
+            return {'action': 'long', 'confidence': 70.0, 'reason': 'golden_cross'}
         
         elif ema_fast < ema_slow and ema_fast_prev >= ema_slow_prev:
             # 死叉 - 做空
             if has_position:
                 current_side = portfolio.positions[symbol].side
                 if current_side == Side.LONG:
-                    return {'action': 'short', 'confidence': 0.7, 'reason': 'death_cross_reverse'}
-                return {'action': 'hold', 'confidence': 0.5, 'reason': 'already_short'}
-            return {'action': 'short', 'confidence': 0.7, 'reason': 'death_cross'}
+                    return {'action': 'short', 'confidence': 70.0, 'reason': 'death_cross_reverse'}
+                return {'action': 'hold', 'confidence': 50.0, 'reason': 'already_short'}
+            return {'action': 'short', 'confidence': 70.0, 'reason': 'death_cross'}
         
-        return {'action': 'hold', 'confidence': 0.3, 'reason': 'no_signal'}
+        return {'action': 'hold', 'confidence': 30.0, 'reason': 'no_signal'}
     
     def stop(self):
         """停止回测"""
@@ -790,7 +795,10 @@ async def run_backtest_cli(
     
     engine = BacktestEngine(config)
     
-    def progress(current, total, pct):
+    def progress(data: dict):
+        current = data.get('current_timepoint', 0)
+        total = data.get('total_timepoints', 0)
+        pct = data.get('progress', 0)
         print(f"\rProgress: {current}/{total} ({pct:.1f}%)", end="", flush=True)
     
     result = await engine.run(progress_callback=progress)
@@ -820,8 +828,11 @@ async def test_backtest_engine():
     
     engine = BacktestEngine(config)
     
-    def progress(current, total, pct):
-        if current % 10 == 0:
+    def progress(data: dict):
+        current = data.get('current_timepoint', 0)
+        total = data.get('total_timepoints', 0)
+        pct = data.get('progress', 0)
+        if total and (current % 10 == 0 or current == total):
             print(f"   Progress: {pct:.1f}%")
     
     result = await engine.run(progress_callback=progress)

@@ -47,9 +47,9 @@ class OvertradingGuard:
     - 连续2次亏损后，需要等待4个周期
     """
     
-    MIN_CYCLES_SAME_SYMBOL = 2        # 同symbol最小间隔周期
-    MAX_POSITIONS_6H = 3              # 6小时内最多开仓数
-    LOSS_STREAK_COOLDOWN = 4          # 连续亏损后冷却周期
+    MIN_CYCLES_SAME_SYMBOL = 4        # 同symbol最小间隔周期 (1小时)
+    MAX_POSITIONS_6H = 2              # 6小时内最多开仓数 (减少过度交易)
+    LOSS_STREAK_COOLDOWN = 6          # 连续亏损后冷却周期 (增加冷却时间)
     CONSECUTIVE_LOSS_THRESHOLD = 2   # 触发冷却的连续亏损次数
     
     def __init__(self):
@@ -121,20 +121,22 @@ class SignalWeight:
     """信号权重配置
     
     注意: 所有权重应该合计为 1.0 (不包括动态 sentiment)
-    优化后配置 (2026-01-05): 基于历史交易数据分析调整
+    优化后配置 (2026-01-07): 基于回测分析进一步优化
+    - 增加1h权重，减少短周期噪音
+    - 减少prophet权重，更依赖技术指标
     """
-    # 趋势信号 (合计 0.40) - OPTIMIZED: 增加1h权重，减少短周期噪音
-    trend_5m: float = 0.05   # 保持不变
-    trend_15m: float = 0.10  # 保持不变
-    trend_1h: float = 0.25   # 从 0.20 增加到 0.25 (更重视长周期趋势)
+    # 趋势信号 (合计 0.45) - 增加长周期权重
+    trend_5m: float = 0.03   # 减少5m噪音影响
+    trend_15m: float = 0.12  # 略增
+    trend_1h: float = 0.30   # 增加1h权重 (核心趋势判断)
     # 震荡信号 (合计 0.20)
-    oscillator_5m: float = 0.05
+    oscillator_5m: float = 0.03  # 减少5m噪音
     oscillator_15m: float = 0.07
-    oscillator_1h: float = 0.08
-    # Prophet ML 预测权重 - OPTIMIZED: 从 0.15 减少到 0.10
-    prophet: float = 0.10  # 减少ML预测权重，更依赖技术指标
-    # 情绪信号 (动态权重) - OPTIMIZED: 从 0.30 减少到 0.25
-    sentiment: float = 0.25  # 减少情绪权重，避免过度反应
+    oscillator_1h: float = 0.10  # 增加1h权重
+    # Prophet ML 预测权重 - 进一步减少
+    prophet: float = 0.05  # 减少ML权重，避免过拟合
+    # 情绪信号 (动态权重)
+    sentiment: float = 0.25
     # 其他扩展信号（如LLM）
     llm_signal: float = 0.0  # 待整合
 
@@ -143,7 +145,7 @@ class SignalWeight:
 class VoteResult:
     """投票结果"""
     action: str  # 'long', 'short', 'close_long', 'close_short', 'hold'
-    confidence: float  # 0.0 ~ 1.0
+    confidence: float  # 0-100
     weighted_score: float  # -100 ~ +100
     vote_details: Dict[str, float]  # 各信号的贡献分
     multi_period_aligned: bool  # 多周期是否一致
@@ -353,7 +355,11 @@ class DecisionCoreAgent:
             prophet_score=scores.get('prophet', 0),
             regime=regime
         )
-        # 10. 构建结果
+        
+        # 10. 计算动态交易参数 (新增)
+        trade_params = self._calculate_trade_params(regime, position, final_confidence, action)
+        
+        # 11. 构建结果
         result = VoteResult(
             action=action,
             confidence=final_confidence,
@@ -362,10 +368,11 @@ class DecisionCoreAgent:
             multi_period_aligned=aligned,
             reason=reason,
             regime=regime,
-            position=position
+            position=position,
+            trade_params=trade_params
         )
         
-        # 11. 记录历史
+        # 12. 记录历史
         self.history.append(result)
         
         return result
@@ -401,6 +408,78 @@ class DecisionCoreAgent:
         
         return max(5.0, min(100.0, conf))
     
+    def _calculate_trade_params(
+        self, 
+        regime: Optional[Dict], 
+        position: Optional[Dict], 
+        confidence: float,
+        action: str
+    ) -> Dict:
+        """
+        根据市场状态动态调整交易参数 (新增 2026-01-07)
+        
+        Args:
+            regime: 市场状态信息
+            position: 价格位置信息
+            confidence: 决策置信度
+            action: 交易动作
+        
+        Returns:
+            动态交易参数字典
+        """
+        base_size = 100.0  # 基础仓位 USDT
+        base_stop_loss = 1.0  # 基础止损百分比
+        base_take_profit = 2.0  # 基础止盈百分比
+        
+        size_multiplier = 1.0
+        sl_multiplier = 1.0
+        tp_multiplier = 1.0
+        
+        # 根据市场状态调整
+        if regime:
+            regime_type = (regime.get('regime', '') or '').lower()
+            
+            if 'volatile' in regime_type:
+                # 高波动市场：减少仓位，扩大止损
+                size_multiplier *= 0.5
+                sl_multiplier *= 1.5  # 止损放宽到1.5%
+                tp_multiplier *= 1.5  # 止盈也放宽
+            elif regime_type in ['trending_up', 'trending_down']:
+                # 趋势市场：可以略增仓位，扩大止盈
+                size_multiplier *= 1.2
+                tp_multiplier *= 1.5  # 趋势中让利润奔跑
+            elif regime_type == 'choppy':
+                # 震荡市场：减少仓位，收紧参数
+                size_multiplier *= 0.6
+                sl_multiplier *= 0.8
+                tp_multiplier *= 0.8
+        
+        # 根据价格位置调整
+        if position:
+            quality = position.get('quality', 'average')
+            if quality == 'excellent':
+                size_multiplier *= 1.3  # 优质位置可加仓
+            elif quality == 'poor':
+                size_multiplier *= 0.5  # 差位置减仓
+        
+        # 根据置信度调整
+        if confidence > 70:
+            size_multiplier *= min(confidence / 70, 1.5)  # 高置信度可加仓
+        elif confidence < 50:
+            size_multiplier *= 0.7  # 低置信度减仓
+        
+        # 如果是hold，仓位为0
+        if action == 'hold':
+            size_multiplier = 0
+        
+        return {
+            'position_size': round(base_size * size_multiplier, 2),
+            'stop_loss_pct': round(base_stop_loss * sl_multiplier, 2),
+            'take_profit_pct': round(base_take_profit * tp_multiplier, 2),
+            'leverage_suggested': 1 if size_multiplier < 0.8 else (2 if size_multiplier > 1.2 else 1),
+            'reason': f"size_mult={size_multiplier:.2f}, sl_mult={sl_multiplier:.2f}, tp_mult={tp_multiplier:.2f}"
+        }
+    
     def _check_multi_period_alignment(
         self, 
         score_1h: float, 
@@ -408,42 +487,36 @@ class DecisionCoreAgent:
         score_5m: float
     ) -> Tuple[bool, str]:
         """
-        检测多周期趋势一致性
+        检测多周期趋势一致性 (优化版 2026-01-07)
         
-        策略:
+        策略 (收紧条件，减少噪音交易):
         - 三个周期方向一致（同为正或同为负）-> 强对齐
-        - 1h和15m一致，5m可反 -> 部分对齐
-        - 1h中性时，检查15m和5m -> 优化：放宽条件
-        - 其他 -> 不对齐
+        - 1h和15m一致（忽略5m噪音）-> 部分对齐
+        - 其他情况 -> 不对齐（必须有1h方向确认）
         
         Returns:
             (是否对齐, 对齐原因)
         """
+        # 提高阈值判断，减少噪音信号
         signs = [
-            1 if score_1h > 10 else (-1 if score_1h < -10 else 0),
-            1 if score_15m > 10 else (-1 if score_15m < -10 else 0),
-            1 if score_5m > 10 else (-1 if score_5m < -10 else 0)
+            1 if score_1h > 20 else (-1 if score_1h < -20 else 0),   # 1h 阈值提高
+            1 if score_15m > 15 else (-1 if score_15m < -15 else 0), # 15m 阈值提高
+            1 if score_5m > 10 else (-1 if score_5m < -10 else 0)    # 5m 保持
         ]
         
-        # 三周期完全一致
+        # 三周期完全一致 - 最强信号
         if signs[0] == signs[1] == signs[2] and signs[0] != 0:
             return True, f"三周期强势{('多头' if signs[0] > 0 else '空头')}对齐"
         
-        # 1h和15m一致（忽略5m噪音）
+        # 1h和15m一致（忽略5m噪音）- 可靠信号
         if signs[0] == signs[1] and signs[0] != 0:
             return True, f"中长周期{('多头' if signs[0] > 0 else '空头')}对齐(1h+15m)"
         
-        # 优化：1h中性时，检查15m和5m是否一致
-        if signs[0] == 0 and signs[1] == signs[2] and signs[1] != 0:
-            return True, f"短周期{('多头' if signs[1] > 0 else '空头')}对齐(15m+5m)，1h中性"
+        # 移除：1h中性时的宽松条件
+        # 原因：1h没有明确方向时不应轻易入场，减少噪音交易
         
-        # 优化：1h中性但15m有明确方向
-        if signs[0] == 0 and abs(score_15m) > 30:
-            direction = '多头' if signs[1] > 0 else '空头'
-            return True, f"15m强势{direction}信号(得分:{score_15m:.0f})，1h中性"
-        
-        # 不对齐
-        return False, f"多周期分歧(1h:{signs[0]}, 15m:{signs[1]}, 5m:{signs[2]})"
+        # 不对齐 - 需要等待更明确的信号
+        return False, f"多周期分歧(1h:{signs[0]}, 15m:{signs[1]}, 5m:{signs[2]})，等待1h确认"
     
     def _score_to_action(
         self, 
@@ -454,54 +527,58 @@ class DecisionCoreAgent:
         """
         将加权得分映射为交易动作
         
-        策略:
-        - 得分>50 且 对齐 -> long (high confidence)
-        - 得分>阈值 -> long (medium confidence)
-        - 得分<-50 且 对齐 -> short (high confidence)
-        - 得分<-阈值 -> short (medium confidence)
-        - 其他 -> hold
-        
-        优化: 根据市场状态动态调整阈值
+        策略 (优化后 2026-01-07):
+        - 分离多空阈值，增加做空机会
+        - 根据市场趋势动态调整阈值
+        - 提高进场质量，减少噪音交易
         
         Returns:
             (action, confidence)
         """
-        # 动态阈值：根据市场状态调整
-        # CRITICAL FIX: 阈值需要匹配实际加权得分范围
-        # 权重总和约 0.80，理论最大分 = 100 * 0.80 = 80
-        # 实际情况：单一方向信号（如 trend_15m=60）贡献 60 * 0.10 = 6
-        # 合理阈值范围：8-15（而不是 20-30）
-        base_threshold = 15
+        # 分离多空阈值 - 关键优化：启用双向交易
+        long_threshold = 20   # 提高做多阈值
+        short_threshold = 18  # 做空阈值略低，增加做空机会
+        
+        # 根据市场状态动态调整阈值
         if regime:
             regime_type = (regime.get('regime', '') or '').lower()
-            if regime_type in ['volatile_directionless', 'choppy']:
-                # 波动无方向市场：大幅降低阈值捕捉信号
-                base_threshold = 8
-            elif regime_type in ['trending', 'trending_up', 'trending_down']:
-                # 趋势市场：标准阈值
-                base_threshold = 15
+            if regime_type in ['trending_down']:
+                # 下跌趋势：大幅降低做空阈值，提高做多阈值
+                short_threshold = 12
+                long_threshold = 25
+            elif regime_type in ['trending_up']:
+                # 上涨趋势：降低做多阈值，提高做空阈值
+                long_threshold = 15
+                short_threshold = 25
+            elif regime_type in ['volatile_directionless', 'choppy']:
+                # 震荡市：提高两边阈值，减少交易
+                long_threshold = 25
+                short_threshold = 25
             elif regime_type in ['volatile_trending']:
-                # 波动趋势：略微降低
-                base_threshold = 10
-        
-        high_threshold = base_threshold + 10  # 强信号阈值
+                # 波动趋势：中等阈值
+                long_threshold = 18
+                short_threshold = 18
         
         # 强信号阈值（需要多周期对齐）
-        if weighted_score > high_threshold and aligned:
+        long_high_threshold = long_threshold + 15
+        short_high_threshold = short_threshold + 15
+        
+        # 强信号：高阈值 + 多周期对齐
+        if weighted_score > long_high_threshold and aligned:
             return 'long', 0.85
-        if weighted_score < -high_threshold and aligned:
+        if weighted_score < -short_high_threshold and aligned:
             return 'short', 0.85
         
-        # 中等信号阈值
-        if weighted_score > base_threshold:
-            confidence = 0.6 + (weighted_score - base_threshold) * 0.01
+        # 中等信号
+        if weighted_score > long_threshold:
+            confidence = 0.55 + (weighted_score - long_threshold) * 0.01
             return 'long', min(confidence, 0.75)
-        if weighted_score < -base_threshold:
-            confidence = 0.6 + (abs(weighted_score) - base_threshold) * 0.01
+        if weighted_score < -short_threshold:
+            confidence = 0.55 + (abs(weighted_score) - short_threshold) * 0.01
             return 'short', min(confidence, 0.75)
         
         # 弱信号或冲突 -> 观望
-        return 'hold', abs(weighted_score) / 100  # 置信度取决于得分绝对值
+        return 'hold', abs(weighted_score) / 100
     
     def _generate_reason(
         self, 
@@ -622,7 +699,7 @@ class DecisionCoreAgent:
 **加权投票结果**:
 - 综合得分: {vote_result.weighted_score:.1f} (-100~+100)
 - 建议动作: {vote_result.action}
-- 置信度: {vote_result.confidence:.2%}
+- 置信度: {vote_result.confidence:.1f}%
 - 多周期对齐: {'✅ 是' if vote_result.multi_period_aligned else '❌ 否'}
 
 **市场体制 (Regime Analysis)**:
@@ -730,7 +807,7 @@ async def test_decision_core():
     
     print(f"  ✅ 决策动作: {result.action}")
     print(f"  ✅ 综合得分: {result.weighted_score:.2f}")
-    print(f"  ✅ 置信度: {result.confidence:.2%}")
+    print(f"  ✅ 置信度: {result.confidence:.1f}%")
     print(f"  ✅ 多周期对齐: {result.multi_period_aligned}")
     print(f"  ✅ 决策原因: {result.reason}")
     
@@ -747,7 +824,7 @@ async def test_decision_core():
     
     stats = decision_core.get_statistics()
     print(f"  ✅ 总决策次数: {stats['total_decisions']}")
-    print(f"  ✅ 平均置信度: {stats['avg_confidence']:.2%}")
+    print(f"  ✅ 平均置信度: {stats['avg_confidence']:.1f}%")
     print(f"  ✅ 对齐率: {stats['alignment_rate']:.2%}")
     
     print("\n✅ 决策中枢Agent测试通过!")

@@ -47,6 +47,12 @@ data/**/*
 !data/README.md
 !data/.gitkeep
 
+# 报告目录 (Reports Directory)
+reports/
+reports/**/*
+*.html
+!web/*.html
+
 # 数据库文件 (Database Files)
 *.db
 *.sqlite

@@ -1133,7 +1133,7 @@ class MultiAgentTradingBot:
             
             vote_result = VoteResult(
                 action=llm_decision.get('action', 'wait'),
-                confidence=llm_decision.get('confidence', 0) / 100.0,  # 转换为 0-1
+                confidence=llm_decision.get('confidence', 0),
                 weighted_score=llm_decision.get('confidence', 0) - 50,  # -50 to +50
                 vote_details=vote_details,
                 multi_period_aligned=True,
@@ -1283,7 +1283,7 @@ class MultiAgentTradingBot:
             # LOG 3: Critic (Action Case) - if not already logged (Wait case returns early)
             regime_txt = vote_result.regime.get('regime', 'Unknown') if vote_result.regime else 'Unknown'
             # Note: Wait case returns, so if we are here, it's an action.
-            global_state.add_log(f"⚖️ DecisionCoreAgent (The Critic): Context(Regime={regime_txt}) => Vote: {vote_result.action.upper()} (Conf: {vote_result.confidence*100:.0f}%)")
+            global_state.add_log(f"⚖️ DecisionCoreAgent (The Critic): Context(Regime={regime_txt}) => Vote: {vote_result.action.upper()} (Conf: {vote_result.confidence:.0f}%)")
             
             global_state.guardian_status = "Auditing..."
             global_state.guardian_status = "Auditing..."
@@ -1814,7 +1814,7 @@ class MultiAgentTradingBot:
         Args:
             action: 'long' or 'short'
             current_price: 当前价格
-            confidence: 决策置信度 (0-1)
+            confidence: 决策置信度 (0-100)
         
         Returns:
             订单参数字典
@@ -1828,7 +1828,11 @@ class MultiAgentTradingBot:
         # 动态仓位计算：置信度 100% 时使用可用余额的 30%
         # 公式: 仓位比例 = 基础比例(30%) × 置信度
         base_position_pct = 0.30  # 最大仓位比例 30%
-        position_pct = base_position_pct * min(confidence, 1.0)  # 根据置信度调整
+        conf_pct = confidence
+        if isinstance(conf_pct, (int, float)) and 0 < conf_pct <= 1:
+            conf_pct *= 100
+        conf_pct = max(0.0, min(float(conf_pct or 0.0), 100.0))
+        position_pct = base_position_pct * (conf_pct / 100)  # 根据置信度调整
         
         # 计算仓位金额（完全基于可用余额百分比）
         adjusted_position = available_balance * position_pct

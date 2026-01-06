@@ -742,6 +742,65 @@ class BacktestPortfolio:
                 triggered_trades.append(trade)
         
         return triggered_trades
+
+    def check_stop_loss_take_profit_intrabar(
+        self,
+        bars: Dict[str, Dict[str, float]],
+        timestamp: datetime
+    ) -> List[Trade]:
+        """
+        Intrabar SL/TP check using bar high/low.
+
+        Uses conservative ordering: stop_loss -> take_profit -> trailing_stop.
+        """
+        triggered_trades = []
+        symbols_to_close = []
+
+        for symbol, position in self.positions.items():
+            bar = bars.get(symbol)
+            if not isinstance(bar, dict):
+                continue
+
+            high = bar.get('high')
+            low = bar.get('low')
+            if not isinstance(high, (int, float)) or not isinstance(low, (int, float)):
+                # Fallback to close/open if high/low missing
+                fallback = bar.get('close', bar.get('open', 0.0))
+                high = fallback
+                low = fallback
+
+            # Update watermarks for trailing stop with intrabar extremes
+            if position.side == Side.LONG:
+                position.update_price(high)
+                if position.stop_loss is not None and low <= position.stop_loss:
+                    symbols_to_close.append((symbol, position.stop_loss, "stop_loss"))
+                    continue
+                if position.take_profit is not None and high >= position.take_profit:
+                    symbols_to_close.append((symbol, position.take_profit, "take_profit"))
+                    continue
+                if position.trailing_stop_pct is not None:
+                    stop_price = position.highest_price * (1 - position.trailing_stop_pct / 100)
+                    if low <= stop_price:
+                        symbols_to_close.append((symbol, stop_price, "trailing_stop"))
+            else:
+                position.update_price(low)
+                if position.stop_loss is not None and high >= position.stop_loss:
+                    symbols_to_close.append((symbol, position.stop_loss, "stop_loss"))
+                    continue
+                if position.take_profit is not None and low <= position.take_profit:
+                    symbols_to_close.append((symbol, position.take_profit, "take_profit"))
+                    continue
+                if position.trailing_stop_pct is not None:
+                    stop_price = position.lowest_price * (1 + position.trailing_stop_pct / 100)
+                    if high >= stop_price:
+                        symbols_to_close.append((symbol, stop_price, "trailing_stop"))
+
+        for symbol, price, reason in symbols_to_close:
+            trade = self.close_position(symbol, price, timestamp, reason)
+            if trade:
+                triggered_trades.append(trade)
+
+        return triggered_trades
     
     def get_current_equity(self, current_prices: Dict[str, float]) -> float:
         """

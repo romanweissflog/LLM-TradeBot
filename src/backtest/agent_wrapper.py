@@ -235,9 +235,10 @@ class BacktestAgentRunner:
             # We mock the PredictResult (ML disabled for speed/simplicity in backtest for now)
             predict_result = MockPredictResult()
             
+            live_price = snapshot.live_5m.get('open', snapshot.live_5m.get('close', 0))
             market_data_for_critic = {
                  'df_5m': snapshot.stable_5m,
-                 'current_price': snapshot.live_5m.get('close', 0)
+                 'current_price': live_price
             }
             
             vote_result = await self.decision_core.make_decision(
@@ -270,7 +271,7 @@ class BacktestAgentRunner:
                 analysis_result = await self.strategy_composer.run_four_layer_analysis(
                     quant_analysis=quant_analysis,
                     processed_dfs=processed_dfs,
-                    current_price=snapshot.live_5m.get('close', 0),
+                    current_price=live_price,
                     predict_result=predict_result
                 )
                 
@@ -318,7 +319,7 @@ class BacktestAgentRunner:
                     analyzer = PositionAnalyzer()
                     position_1h = analyzer.analyze_position(
                         df_1h,
-                        snapshot.live_5m.get('close', 0),
+                        live_price,
                         timeframe='1h'
                     )
                 except Exception:
@@ -354,7 +355,7 @@ class BacktestAgentRunner:
         import json
         from datetime import datetime
         
-        current_price = snapshot.live_5m.get('close', 0)
+        current_price = snapshot.live_5m.get('open', snapshot.live_5m.get('close', 0))
         symbol = self.config.get('symbol', 'BTCUSDT')
         
         # Build Position Info dict for StrategyComposer

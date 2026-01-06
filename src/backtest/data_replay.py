@@ -10,7 +10,7 @@ Date: 2025-12-31
 """
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Iterator, Optional, Tuple
 from dataclasses import dataclass, field
 import pandas as pd
@@ -73,20 +73,15 @@ class DataReplayAgent:
             client: Binance 客户端（可选）
         """
         self.symbol = symbol
-        
-        # Smart Date Parsing
-        try:
-            self.start_date = datetime.strptime(start_date, "%Y-%m-%d %H:%M")
-        except ValueError:
-            self.start_date = datetime.strptime(start_date, "%Y-%m-%d")
-            
-        try:
-            # If HH:MM is provided, use it exactly
-            self.end_date = datetime.strptime(end_date, "%Y-%m-%d %H:%M")
-        except ValueError:
-            # If only YYYY-MM-DD, add 1 day to include the full end day
-            dt = datetime.strptime(end_date, "%Y-%m-%d")
-            self.end_date = dt + timedelta(days=1)
+
+        start_dt, _ = self._parse_input_date(start_date)
+        end_dt, end_has_time = self._parse_input_date(end_date)
+        if not end_has_time:
+            end_dt = end_dt + timedelta(days=1)
+
+        # Normalize to UTC-naive to match Binance UTC timestamps
+        self.start_date = self._to_utc_naive(start_dt)
+        self.end_date = self._to_utc_naive(end_dt)
             
         self.client = client or BinanceClient()
         
@@ -122,6 +117,12 @@ class DataReplayAgent:
                 # Verify we actually got data for range
                 if not self.timestamps:
                     log.warning("Cache loaded but no timestamps in range. Retrying fetch...")
+                elif not self._cache_covers_range():
+                    log.warning(
+                        "Cache range incomplete for requested window "
+                        f"(expected 5m {self._expected_start_5m()} -> {self._expected_end_5m()}, "
+                        f"cache {self._describe_cache_range()}). Refetching..."
+                    )
                 else:
                     log.info(f"✅ Loaded {len(self.timestamps)} timestamps from cache")
                     return True
@@ -132,6 +133,13 @@ class DataReplayAgent:
         log.info(f"📥 Fetching historical data from Binance API...")
         try:
             await self._fetch_from_api()
+            if not self._cache_covers_range():
+                log.error(
+                    "Fetched data does not fully cover requested range "
+                    f"(expected 5m {self._expected_start_5m()} -> {self._expected_end_5m()}, "
+                    f"cache {self._describe_cache_range()})."
+                )
+                return False
             # 保存到缓存
             self._save_to_cache(cache_file)
             log.info(f"✅ Fetched and cached {len(self.timestamps)} timestamps")
@@ -139,6 +147,69 @@ class DataReplayAgent:
         except Exception as e:
             log.error(f"❌ Failed to fetch historical data: {e}")
             return False
+
+    def _parse_input_date(self, value: str) -> Tuple[datetime, bool]:
+        """解析输入日期，返回 (datetime, 是否包含时间)"""
+        try:
+            return datetime.strptime(value, "%Y-%m-%d %H:%M"), True
+        except ValueError:
+            return datetime.strptime(value, "%Y-%m-%d"), False
+
+    def _to_utc_naive(self, dt: datetime) -> datetime:
+        """将本地时间转换为UTC-naive，避免与Binance UTC时间轴错位"""
+        if dt.tzinfo is None:
+            local_tz = datetime.now().astimezone().tzinfo
+            dt = dt.replace(tzinfo=local_tz)
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+    def _utc_timestamp_ms(self, dt: datetime) -> int:
+        """UTC-naive -> UTC 时间戳 (ms)"""
+        return int(dt.replace(tzinfo=timezone.utc).timestamp() * 1000)
+
+    def _describe_cache_range(self) -> str:
+        """简要描述缓存数据时间范围（用于诊断）"""
+        if self.data_cache is None:
+            return "cache=None"
+        def _range(df: pd.DataFrame) -> str:
+            if df is None or df.empty:
+                return "empty"
+            return f"{df.index.min()} -> {df.index.max()}"
+        return f"5m[{_range(self.data_cache.df_5m)}], 15m[{_range(self.data_cache.df_15m)}], 1h[{_range(self.data_cache.df_1h)}]"
+
+    def _expected_start_5m(self) -> datetime:
+        return pd.Timestamp(self.start_date).ceil("5min").to_pydatetime()
+
+    def _expected_end_5m(self) -> datetime:
+        end_cutoff = self.end_date - timedelta(seconds=1)
+        return pd.Timestamp(end_cutoff).floor("5min").to_pydatetime()
+
+    def _cache_covers_range(self) -> bool:
+        """检查缓存是否覆盖完整回测窗口（含多周期）"""
+        if self.data_cache is None:
+            return False
+        df_5m = self.data_cache.df_5m
+        df_15m = self.data_cache.df_15m
+        df_1h = self.data_cache.df_1h
+        if df_5m.empty or df_15m.empty or df_1h.empty:
+            return False
+
+        start_5m = pd.Timestamp(self.start_date).ceil("5min")
+        start_15m = pd.Timestamp(self.start_date).ceil("15min")
+        start_1h = pd.Timestamp(self.start_date).ceil("60min")
+
+        end_cutoff = self.end_date - timedelta(seconds=1)
+        end_5m = pd.Timestamp(end_cutoff).floor("5min")
+        end_15m = pd.Timestamp(end_cutoff).floor("15min")
+        end_1h = pd.Timestamp(end_cutoff).floor("60min")
+
+        if df_5m.index.min() > start_5m or df_5m.index.max() < end_5m:
+            return False
+        if df_15m.index.min() > start_15m or df_15m.index.max() < end_15m:
+            return False
+        if df_1h.index.min() > start_1h or df_1h.index.max() < end_1h:
+            return False
+
+        return True
     
     def _get_cache_path(self) -> str:
         """生成缓存文件路径"""
@@ -226,8 +297,8 @@ class DataReplayAgent:
         
         try:
             # 计算时间范围
-            start_ts = int(self.start_date.timestamp() * 1000)
-            end_ts = int(self.end_date.timestamp() * 1000)
+            start_ts = self._utc_timestamp_ms(self.start_date)
+            end_ts = self._utc_timestamp_ms(self.end_date)
             
             # Binance API 每次最多返回 1000 条
             current_start = start_ts
@@ -274,7 +345,7 @@ class DataReplayAgent:
         batch_size = 1000  # Binance 推荐的批次大小
         
         # 计算结束时间戳
-        end_ts = int(self.end_date.timestamp() * 1000)
+        end_ts = self._utc_timestamp_ms(self.end_date)
         
         remaining = total_limit
         current_end = end_ts
@@ -433,6 +504,15 @@ class DataReplayAgent:
         live_15m_dict = df_15m.iloc[-1].to_dict() if len(df_15m) > 0 else {}
         live_1h_dict = df_1h.iloc[-1].to_dict() if len(df_1h) > 0 else {}
         
+        funding_snapshot = {}
+        fr_record = self.get_funding_rate_at(timestamp)
+        if fr_record:
+            funding_snapshot = {
+                'funding_rate': fr_record.funding_rate,
+                'timestamp': fr_record.timestamp,
+                'mark_price': fr_record.mark_price
+            }
+
         snapshot = MarketSnapshot(
             stable_5m=df_5m.iloc[:-1] if len(df_5m) > 1 else df_5m,
             stable_15m=df_15m.iloc[:-1] if len(df_15m) > 1 else df_15m,
@@ -441,8 +521,10 @@ class DataReplayAgent:
             live_15m=live_15m_dict,
             live_1h=live_1h_dict,
             timestamp=timestamp,
-            alignment_ok=True,
-            fetch_duration=0.0
+            alignment_ok=self._check_alignment(df_5m, df_15m, df_1h),
+            fetch_duration=0.0,
+            binance_funding=funding_snapshot,
+            binance_oi={}
         )
         
         self.latest_snapshot = snapshot
@@ -547,13 +629,42 @@ class DataReplayAgent:
         
         Binance 合约资金费率结算时间：UTC 00:00, 08:00, 16:00
         """
-        utc_hour = (timestamp.hour - 8) % 24  # 假设本地时区为 UTC+8
-        utc_minute = timestamp.minute
+        if timestamp.tzinfo is not None:
+            ts_utc = timestamp.astimezone(timezone.utc)
+        else:
+            ts_utc = timestamp
+        utc_hour = ts_utc.hour
+        utc_minute = ts_utc.minute
         
         # 检查是否为结算时刻（允许几分钟误差）
         if utc_hour in [0, 8, 16] and utc_minute < 10:
             return True
         return False
+
+    def _check_alignment(
+        self,
+        df_5m: pd.DataFrame,
+        df_15m: pd.DataFrame,
+        df_1h: pd.DataFrame
+    ) -> bool:
+        """检查多周期数据对齐性（基于索引时间戳）"""
+        if df_5m.empty or df_15m.empty or df_1h.empty:
+            return False
+
+        try:
+            t5m = df_5m.index[-1]
+            t15m = df_15m.index[-1]
+            t1h = df_1h.index[-1]
+
+            diff_5m_15m = abs((t5m - t15m).total_seconds())
+            diff_5m_1h = abs((t5m - t1h).total_seconds())
+
+            max_diff_15m = 15 * 60
+            max_diff_1h = 60 * 60
+
+            return diff_5m_15m <= max_diff_15m and diff_5m_1h <= max_diff_1h
+        except Exception:
+            return False
     
     def get_funding_rate_for_settlement(self, timestamp: datetime) -> Optional[float]:
         """

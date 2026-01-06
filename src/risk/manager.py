@@ -187,6 +187,8 @@ class RiskManager:
         regime = decision.get('regime')
         position = decision.get('position')
         confidence = decision.get('confidence', 0)
+        if isinstance(confidence, (int, float)) and 0 < confidence <= 1:
+            confidence *= 100
         
         # 2. 市场状态检查 (一票否决)
         if regime:

@@ -236,8 +236,11 @@ class BacktestAgentRunner:
             predict_result = MockPredictResult()
             
             live_price = snapshot.live_5m.get('open', snapshot.live_5m.get('close', 0))
+            # 🔧 FIX: Pass complete market_data consistent with live trading environment
             market_data_for_critic = {
                  'df_5m': snapshot.stable_5m,
+                 'df_15m': snapshot.stable_15m,  # Added for consistency
+                 'df_1h': snapshot.stable_1h,    # Added for consistency
                  'current_price': live_price
             }
             

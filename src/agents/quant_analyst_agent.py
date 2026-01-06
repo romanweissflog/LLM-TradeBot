@@ -159,6 +159,7 @@ class QuantAnalystAgent:
         regime = self.regime_detector.detect_regime(snapshot.stable_1h) if snapshot.stable_1h is not None else {}
         
         result = {
+            'symbol': snapshot.symbol,  # 🔧 FIX: Include symbol for DecisionCoreAgent's OvertradingGuard
             'sentiment': sentiment,
             'volatility': volatility,
             'regime': regime,

@@ -59,6 +59,9 @@ class MarketSnapshot:
     raw_5m: List[Dict] = field(default_factory=list)
     raw_15m: List[Dict] = field(default_factory=list)
     raw_1h: List[Dict] = field(default_factory=list)
+    
+    # 🔧 FIX: Added symbol for pipeline tracking (must come after fields with defaults)
+    symbol: str = "UNKNOWN"
 
 
 class DataSyncAgent:
@@ -210,6 +213,8 @@ class DataSyncAgent:
         
         # 拆分双视图
         snapshot = MarketSnapshot(
+            # 交易对标识
+            symbol=symbol,  # 🔧 FIX: Propagate symbol through pipeline
             # 5m 数据
             stable_5m=self._to_dataframe(k5m[:-1]),
             live_5m=k5m[-1] if k5m else {},

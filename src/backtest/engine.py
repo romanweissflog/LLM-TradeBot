@@ -349,6 +349,7 @@ class BacktestEngine:
                     
                     callback_data = {
                         'progress': progress_pct,
+                        'pct': progress_pct,
                         'current_timepoint': i + 1,  # Human-readable: 1-indexed
                         'total_timepoints': total,
                         'current_equity': current_equity,
@@ -356,6 +357,7 @@ class BacktestEngine:
                         'profit_pct': profit_pct,
                         'timestamp': timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp),
                         'equity_point': latest_equity_point,
+                        'latest_equity_point': latest_equity_point,
                         'latest_trade': latest_trade,
                         'metrics': {
                             'total_trades': trades_count,

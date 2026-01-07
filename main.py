@@ -86,6 +86,7 @@ from src.agents import (
 )
 from src.strategy.llm_engine import StrategyEngine
 from src.agents.predict_agent import PredictAgent
+from src.agents.symbol_selector_agent import get_selector  # 🔝 AUTO2 Support
 from src.server.app import app
 from src.server.state import global_state
 
@@ -151,8 +152,17 @@ class MultiAgentTradingBot:
                 else:
                     self.symbols = [symbol_str]
 
+        # 🔝 AUTO2 Dynamic Resolution (takes priority)
+        self.use_auto2 = 'AUTO2' in self.symbols
+        if self.use_auto2:
+            self.symbols.remove('AUTO2')
+            # If AUTO2 was the only symbol, add temporary placeholder (will be replaced at startup)
+            if not self.symbols:
+                self.symbols = ['FETUSDT']  # Temporary, replaced by AUTO2 selection in main()
+            log.info("🔝 AUTO2 mode enabled - Startup backtest will run")
+        
         # 🤖 AI500 Dynamic Resolution
-        self.use_ai500 = 'AI500_TOP5' in self.symbols
+        self.use_ai500 = 'AI500_TOP5' in self.symbols and not self.use_auto2
         self.ai500_last_update = None
         self.ai500_update_interval = 6 * 3600  # 6 hours in seconds
         
@@ -402,6 +412,19 @@ class MultiAgentTradingBot:
         updater_thread = threading.Thread(target=updater_loop, daemon=True, name="AI500-Updater")
         updater_thread.start()
         log.info(f"🚀 AI500 Auto-updater started (interval: 6 hours)")
+    
+    async def _resolve_auto2_symbols(self):
+        """
+        🔝 AUTO2 Dynamic Resolution via Backtest
+        
+        Gets AI500 Top 5 by volume, backtests each, and selects top 2
+        """
+        selector = get_selector()
+        top2 = await selector.select_top2(force_refresh=False)
+        
+        log.info(f"🔝 AUTO2 resolved to: {', '.join(top2)}")
+        return top2
+    
     
     
     def _init_accounts(self):
@@ -2556,6 +2579,29 @@ def main():
         take_profit_pct=args.take_profit,
         test_mode=args.test
     )
+    
+    # 🔝 AUTO2 STARTUP EXECUTION (MANDATORY - runs before trading starts)
+    if hasattr(bot, 'use_auto2') and bot.use_auto2:
+        log.info("=" * 60)
+        log.info("🔝 AUTO2 STARTUP - Getting AI500 Top5 and selecting Top2...")
+        log.info("=" * 60)
+        
+        import asyncio
+        loop = asyncio.get_event_loop()
+        top2 = loop.run_until_complete(bot._resolve_auto2_symbols())
+        
+        # Update bot symbols
+        bot.symbols = top2
+        bot.current_symbol = top2[0] if top2 else 'FETUSDT'
+        global_state.symbols = top2
+        
+        # Start auto-refresh thread (12h interval)
+        selector = get_selector()
+        selector.start_auto_refresh()
+        
+        log.info(f"✅ AUTO2 startup complete: {', '.join(top2)}")
+        log.info("🔄 Auto-refresh started (12h interval)")
+        log.info("=" * 60)
     
     # 启动 Dashboard Server (Only if in continuous mode or if explicitly requested, but let's do it always for now if deps exist)
     try:

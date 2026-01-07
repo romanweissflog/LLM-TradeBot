@@ -23,7 +23,8 @@ Intelligent Multi-Agent Quantitative Trading Bot based on the **Adversarial Deci
 ## ✨ Key Features
 
 - 🕵️ **Perception First**: Unlike strict indicator-based systems, this framework prioritizes judging "IF we should trade" before deciding "HOW to trade".
-- 🤖 **Multi-Agent Collaboration**: 9 highly specialized Agents operating independently to form an adversarial verification chain.
+- 🤖 **Multi-Agent Collaboration**: 12 highly specialized Agents operating independently to form an adversarial verification chain.
+- 🔝 **AUTO2 Dynamic Symbol Selection**: Automatic symbol selection based on 24h backtest performance - AI picks the best coins to trade.
 - 🧠 **Multi-LLM Support**: Seamlessly switch between DeepSeek, OpenAI, Claude, Qwen, and Gemini via Dashboard settings.
 - 📊 **Multi-Account Trading**: Manage multiple exchange accounts with unified API abstraction (currently Binance, extensible).
 - ⚡ **Async Concurrency**: Currently fetches multi-timeframe data (5m/15m/1h) concurrently, ensuring data alignment at the snapshot moment.
@@ -379,9 +380,15 @@ LLM-TradeBot/
 
 ## 🎯 Core Architecture
 
-### 12-Agent Collaborative Framework + Four-Layer Strategy
+### 13-Agent Collaborative Framework + Four-Layer Strategy
 
-The system uses a **Four-Layer Strategy Filter** architecture with 12 specialized Agents collaborating to make trading decisions:
+The system uses a **Four-Layer Strategy Filter** architecture with 13 specialized Agents collaborating to make trading decisions:
+
+#### Symbol Selection Layer Agents
+
+| Agent | Role | Responsibility |
+|-------|------|----------------|
+| **🔝 SymbolSelectorAgent** | AUTO2 Selector | Backtest-based dynamic symbol selection from AI500 Top 5 → Top 2 performers |
 
 #### Data Layer Agents
 
@@ -607,6 +614,23 @@ data/
 ---
 
 ## 🎉 Latest Updates
+
+**2026-01-07**:
+
+- ✅ **AUTO2 Dynamic Symbol Selection**: New `SymbolSelectorAgent` that automatically selects the best trading symbols.
+  - Gets AI500 Top 5 coins by 24h trading volume
+  - Runs backtests on each symbol (24h lookback)
+  - Ranks by composite score: Return (30%) + Sharpe (20%) + Win Rate (25%) + Drawdown (15%) + Trade Frequency (10%)
+  - Auto-selects Top 2 performers with 12-hour cache refresh
+- ✅ **BacktestAgentRunner Parity**: Full consistency between backtest and live trading environments.
+  - Risk Audit Agent integrated into backtest flow
+  - Four-Layer Strategy Filter applied in backtests
+  - Position analysis and regime detection enabled
+- ✅ **Enhanced Backtest CLI**: `python backtest.py` with support for:
+  - Multi-symbol backtesting
+  - Agent strategy mode (`--strategy-mode agent`)
+  - LLM enhancement option (`--use-llm`)
+  - Detailed HTML reports with equity curves
 
 **2025-12-31**:
 

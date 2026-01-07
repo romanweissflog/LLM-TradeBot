@@ -2777,10 +2777,10 @@ def main():
         # or exit immediately. Usually 'once' implies run and exit.
         
     else:
-        # [FIX] Default to Running - Auto-start on launch
-        global_state.execution_mode = "Running"
-        global_state.is_running = True
-        log.info("🚀 System ready (Running). Auto-starting trading loop...")
+        # Default to Stopped - Wait for user to click Start button
+        global_state.execution_mode = "Stopped"
+        global_state.is_running = True  # Keep event loop running
+        log.info("🚀 System ready (Stopped). Waiting for user to click Start button...")
         bot.run_continuous(interval_minutes=args.interval)
 
 if __name__ == '__main__':

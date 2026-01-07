@@ -181,6 +181,19 @@ async def get_status(authenticated: bool = Depends(verify_auth)):
             '⏹️', '⏸️', '▶️',
             'STOPPED', 'PAUSED', 'RESUMED', 'START'
         ]
+        
+        def _clean_log_line(line: str) -> str:
+            """Remove file:function patterns like 'src.api.binance_websocket:__init__' from log lines"""
+            # Remove ANSI color codes first
+            clean = re.sub(r'\x1b\[[0-9;]*m', '', line or '')
+            # Remove timestamp pattern: 2026-01-08 00:00:00 | LEVEL    |
+            clean = re.sub(r'^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\s*\|\s*\w+\s*\|\s*', '', clean)
+            # Remove file:function pattern like "src.api.binance_websocket:__init__ -"
+            clean = re.sub(r'^[\w\.]+:[\w_]+ - ', '', clean)
+            # Remove module path pattern like "src.utils.logger:llm_output -"
+            clean = re.sub(r'^src\.[^-]+ - ', '', clean)
+            return clean.strip()
+        
         filtered = []
         for line in logs:
             clean_line = re.sub(r'\x1b\[[0-9;]*m', '', line or '')
@@ -190,19 +203,19 @@ async def get_status(authenticated: bool = Depends(verify_auth)):
                 re.search(r'\berror\b', clean_line, re.IGNORECASE) or
                 '⚠️' in clean_line or
                 '❌' in clean_line):
-                filtered.append(line)
+                filtered.append(_clean_log_line(line))
                 continue
             if any(tag in clean_line for tag in agent_tags):
-                filtered.append(line)
+                filtered.append(_clean_log_line(line))
                 continue
             if any(keyword in clean_line for keyword in agent_keywords):
-                filtered.append(line)
+                filtered.append(_clean_log_line(line))
                 continue
             if any(keyword in clean_line for keyword in status_keywords):
-                filtered.append(line)
+                filtered.append(_clean_log_line(line))
                 continue
             if '━━━' in clean_line or 'Cycle #' in clean_line:
-                filtered.append(line)
+                filtered.append(_clean_log_line(line))
                 continue
         return filtered
 

@@ -286,6 +286,7 @@ class DecisionCoreAgent:
             'prophet': scores.get('prophet', 0) * self.weights.prophet * w_others,
             'sentiment': scores.get('sentiment', 0) * w_sentiment
         }
+        osc_bias = (scores['oscillator_5m'] + scores['oscillator_15m'] + scores['oscillator_1h']) / 3
 
         # 5. 提前过滤逻辑：震荡市+位置不佳（强信号可放行）
         if regime and position:
@@ -379,7 +380,6 @@ class DecisionCoreAgent:
             very_strong_short = aligned and weighted_score <= -45
             fade_long = scores['trend_5m'] < 0 or scores['trend_15m'] < 0
             fade_short = scores['trend_5m'] > 0 or scores['trend_15m'] > 0
-            osc_bias = (scores['oscillator_5m'] + scores['oscillator_15m'] + scores['oscillator_1h']) / 3
             high_extreme = position_pct >= 90
             high_zone = position_pct >= 80
             low_extreme = position_pct <= 8

@@ -189,12 +189,9 @@ class BacktestAgentRunner:
         
         # Use production agents for 100% logic parity
         from src.agents.quant_analyst_agent import QuantAnalystAgent
-        from src.agents.risk_audit_agent import RiskAuditAgent  # 🔧 FIX: Add Risk Audit
-        
         # We only need the DecisionCoreAgent (The Critic) to make final decisions
         self.decision_core = DecisionCoreAgent()
         self.quant_analyst = QuantAnalystAgent() # Replaces legacy calculator
-        self.risk_audit = RiskAuditAgent()  # 🔧 FIX: Initialize Risk Audit Agent
         self.strategy_composer = StrategyComposer() # ✅ Shared Strategy Logic
         
         # LLM log collection for backtest
@@ -291,8 +288,6 @@ class BacktestAgentRunner:
             else:
                 final_decision = vote_result
             
-            # 🔧 FIX: Add Risk Audit Agent (for parity with live trading)
-            # Prepare decision dict for audit
             osc_data = quant_analysis.get('oscillator', {})
             osc_scores = {
                 'osc_1h_score': osc_data.get('osc_1h_score', 0),
@@ -321,63 +316,6 @@ class BacktestAgentRunner:
                         atr_pct = float(atr / close * 100)
                 except Exception:
                     atr_pct = None
-            
-            # 🔧 FIX: Call Risk Audit Agent (matching live trading flow)
-            # Prepare decision dict
-            decision_dict = {
-                'action': final_decision.action,
-                'confidence': final_decision.confidence,
-                'entry_price': live_price,
-                'stop_loss': getattr(final_decision, 'stop_loss', None),
-                'regime': regime_info,
-                'position': position_info,
-                'oscillator_scores': osc_scores,
-                'trend_scores': trend_scores,
-                'trade_params': getattr(final_decision, 'trade_params', None)
-            }
-            
-            # Get current position info for audit
-            current_position = None
-            if portfolio and hasattr(portfolio, 'positions'):
-                symbol = snapshot.symbol if hasattr(snapshot, 'symbol') else 'BTCUSDT'
-                if symbol in portfolio.positions:
-                    pos = portfolio.positions[symbol]
-                    from src.agents.risk_audit_agent import PositionInfo
-                    current_position = PositionInfo(
-                        symbol=symbol,
-                        side=pos.side.value,
-                        quantity=pos.quantity,
-                        entry_price=pos.entry_price,
-                        current_price=live_price,
-                        unrealized_pnl=pos.get_pnl(live_price),
-                        unrealized_pnl_pct=pos.get_pnl_pct(live_price)
-                    )
-            
-            # Call Risk Audit
-            account_balance = portfolio.cash if portfolio else 10000.0
-            audit_result = await self.risk_audit.audit_decision(
-                decision=decision_dict,
-                current_position=current_position,
-                account_balance=account_balance,
-                current_price=live_price,
-                atr_pct=atr_pct
-            )
-            
-            # Apply audit corrections
-            if not audit_result.passed:
-                # Audit blocked the decision
-                log.warning(f"🛡️ Risk Audit BLOCKED: {audit_result.blocked_reason}")
-                return {
-                    'action': 'hold',
-                    'confidence': 0,
-                    'reason': f"Risk Audit: {audit_result.blocked_reason}",
-                    'vote_details': {},
-                    'weighted_score': 0
-                }
-            elif audit_result.corrections:
-                # Apply corrections to decision
-                if 'stop_loss' in audit_result.corrections:
-                    log.info(f"🔧 Risk Audit corrected stop_loss to {audit_result.corrections['stop_loss']:.2f}")
             
             # Calculate position_1h for context
             position_1h = None

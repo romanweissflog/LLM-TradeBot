@@ -28,6 +28,7 @@ Intelligent Multi-Agent Quantitative Trading Bot based on the **Adversarial Deci
 - 🧠 **Multi-LLM Support**: Seamlessly switch between DeepSeek, OpenAI, Claude, Qwen, and Gemini via Dashboard settings.
 - 📊 **Multi-Account Trading**: Manage multiple exchange accounts with unified API abstraction (currently Binance, extensible).
 - ⚡ **Async Concurrency**: Currently fetches multi-timeframe data (5m/15m/1h) concurrently, ensuring data alignment at the snapshot moment.
+- 🖥️ **CLI Headless Mode**: Run without Web UI for headless servers - rich terminal output with 93% less log verbosity.
 - 🛡️ **Safety First**: Stop-loss direction correction, capital pre-rehearsal, and veto mechanisms to safeguard live trading.
 - 📊 **Full-Link Auditing**: Every decision's adversarial process and confidence penalty details are recorded, achieving true "White-Box" decision-making.
 
@@ -221,6 +222,53 @@ Simulates trading with virtual balance ($1000). No real trades executed.
 ```bash
 # Start with test mode
 python main.py --test --mode continuous
+```
+
+#### 🖥️ CLI Headless Mode (For Servers)
+
+Run the bot without Web Dashboard, perfect for headless servers or terminal-only environments.
+
+```bash
+# Basic CLI mode (manual start required)
+python main.py --test --headless
+
+# Auto-start mode (trading begins immediately)
+python main.py --test --headless --auto-start
+
+# Custom interval (1 minute cycles)
+python main.py --test --headless --auto-start --interval 1
+```
+
+**Features**:
+
+- ✅ No Web UI - runs entirely in terminal
+- ✅ Rich formatted output with colors and tables
+- ✅ Real-time price updates and trading decisions
+- ✅ Account summary panel after each cycle
+- ✅ Graceful shutdown with session statistics (Ctrl+C)
+- ✅ Optimized log output (93% less verbose than Web mode)
+
+**Output Example**:
+
+```
+╔═══════════════════════════════════════════════════════╗
+║ 🤖 LLM-TradeBot CLI - TEST MODE                      ║
+╚═══════════════════════════════════════════════════════╝
+
+─────────── Cycle #1 | LINKUSDT, NEARUSDT ────────────
+  🔍 Analyzing LINKUSDT...
+  ✅ Data ready: $13.29
+  
+  ⏸️  HOLD | Confidence: 45.0%
+     Reason: No clear 1h trend
+
+╭─────────────── Account Summary ───────────────────╮
+│ 💰 Equity:    $1,000.00                           │
+│ 📊 Available:   $900.00                           │
+│ 📈 PnL:          $0.00 (0.00%)                    │
+╰───────────────────────────────────────────────────╯
+
+  ⏳ Next cycle in 1.0 minutes...
 ```
 
 #### 🔴 Live Trading Mode

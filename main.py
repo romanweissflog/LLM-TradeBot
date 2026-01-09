@@ -577,9 +577,13 @@ class MultiAgentTradingBot:
                 'details': {...}
             }
         """
-        print(f"\n{'='*80}")
-        print(f"🔄 启动交易审计循环 | {datetime.now().strftime('%H:%M:%S')} | {self.current_symbol}")
-        print(f"{'='*80}")
+        # Headless mode: Simplified output
+        if hasattr(self, '_headless_mode') and self._headless_mode:
+            self._terminal_display.print_log(f"🔍 Analyzing {self.current_symbol}...", "INFO")
+        else:
+            print(f"\n{'='*80}")
+            print(f"🔄 启动交易审计循环 | {datetime.now().strftime('%H:%M:%S')} | {self.current_symbol}")
+            print(f"{'='*80}")
         
         # Update Dashboard Status
         global_state.is_running = True
@@ -597,7 +601,8 @@ class MultiAgentTradingBot:
             snapshot_id = f"snap_{int(time.time())}"
 
             # Step 1: 采样 - 数据先知 (The Oracle)
-            print("\n[Step 1/4] 🕵️ The Oracle (Data Agent) - Fetching data...")
+            if not (hasattr(self, '_headless_mode') and self._headless_mode):
+                print("\n[Step 1/4] 🕵️ The Oracle (Data Agent) - Fetching data...")
             global_state.oracle_status = "Fetching Data..." 
             market_snapshot = await self.data_sync_agent.fetch_all_timeframes(
                 self.current_symbol,
@@ -769,7 +774,8 @@ class MultiAgentTradingBot:
                 }
             
             # Step 2: Strategist
-            print("[Step 2/4] 👨‍🔬 The Strategist (QuantAnalyst) - Analyzing data...")
+            if not (hasattr(self, '_headless_mode') and self._headless_mode):
+                print("[Step 2/4] 👨‍🔬 The Strategist (QuantAnalyst) - Analyzing data...")
             quant_analysis = await self.quant_analyst.analyze_all_timeframes(market_snapshot)
             
             # 💉 INJECT MACD DATA (Fix for Missing Data)
@@ -794,7 +800,8 @@ class MultiAgentTradingBot:
             global_state.add_log(f"[👨‍🔬 STRATEGIST] Trend={trend_score:+.0f} | Osc={osc_score:+.0f} | Sent={sent_score:+.0f}")
             
             # Step 2.5: Prophet
-            print("[Step 2.5/5] 🔮 The Prophet (Predict Agent) - Calculating probability...")
+            if not (hasattr(self, '_headless_mode') and self._headless_mode):
+                print("[Step 2.5/5] 🔮 The Prophet (Predict Agent) - Calculating probability...")
             df_15m_features = self.feature_engineer.build_features(processed_dfs['15m'])
             if not df_15m_features.empty:
                 latest = df_15m_features.iloc[-1].to_dict()
@@ -814,7 +821,8 @@ class MultiAgentTradingBot:
             self.saver.save_prediction(asdict(predict_result), self.current_symbol, snapshot_id, cycle_id=cycle_id)
             
             # === 🎯 FOUR-LAYER STRATEGY FILTERING ===
-            print("[Step 2.75/5] 🎯 Four-Layer Strategy Filter - 多层验证中...")
+            if not (hasattr(self, '_headless_mode') and self._headless_mode):
+                print("[Step 2.75/5] 🎯 Four-Layer Strategy Filter - 多层验证中...")
             
             # Extract timeframe data
             trend_6h = quant_analysis.get('timeframe_6h', {})
@@ -1114,7 +1122,8 @@ class MultiAgentTradingBot:
             global_state.four_layer_result = four_layer_result
             
             # 🆕 MULTI-AGENT SEMANTIC ANALYSIS
-            print("[Step 2.5/5] 🤖 Multi-Agent Semantic Analysis...")
+            if not (hasattr(self, '_headless_mode') and self._headless_mode):
+                print("[Step 2.5/5] 🤖 Multi-Agent Semantic Analysis...")
             try:
                 from src.agents.trend_agent import TrendAgent
                 from src.agents.setup_agent import SetupAgent
@@ -1191,7 +1200,8 @@ class MultiAgentTradingBot:
             }
             regime_info = quant_analysis.get('regime', {})
             
-            print("[Step 3/5] 🧠 DeepSeek LLM - Making decision...")
+            if not (hasattr(self, '_headless_mode') and self._headless_mode):
+                print("[Step 3/5] 🧠 DeepSeek LLM - Making decision...")
             
             # Build Context with POSITION INFO
             market_context_text = self._build_market_context(
@@ -1432,11 +1442,8 @@ class MultiAgentTradingBot:
                 }
             
             # Step 4: 审计 - 风控守护者 (The Guardian)
-            print(f"[Step 4/5] 👮 The Guardian (Risk Audit) - Final review...")
-            
-            # Critic Log for Action decision
-            # Step 4: 审计 - 风控守护者 (The Guardian)
-            print(f"[Step 4/5] 👮 The Guardian (Risk Audit) - Final review...")
+            if not (hasattr(self, '_headless_mode') and self._headless_mode):
+                print(f"[Step 4/5] 👮 The Guardian (Risk Audit) - Final review...")
             
             # LOG 3: Critic (Action Case) - if not already logged (Wait case returns early)
             regime_txt = vote_result.regime.get('regime', 'Unknown') if vote_result.regime else 'Unknown'
@@ -1662,7 +1669,8 @@ class MultiAgentTradingBot:
                 }
             # Step 5: 执行引擎
             if self.test_mode:
-                print("\n[Step 5/5] 🧪 TestMode - 模拟执行...")
+                if not (hasattr(self, '_headless_mode') and self._headless_mode):
+                    print("\n[Step 5/5] 🧪 TestMode - 模拟执行...")
                 print(f"  模拟订单: {order_params['action']} {order_params['quantity']} @ {current_price}")
                 
                 # LOG 5: Executor (Test)
@@ -1810,7 +1818,8 @@ class MultiAgentTradingBot:
                 }
             else:
                 # Live Execution
-                print("\n[Step 5/5] 🚀 LiveTrade - 实盘执行...")
+                if not (hasattr(self, '_headless_mode') and self._headless_mode):
+                    print("\n[Step 5/5] 🚀 LiveTrade - 实盘执行...")
                 
                 try:
                     # _execute_order returns bool
@@ -2384,15 +2393,54 @@ class MultiAgentTradingBot:
         t = threading.Thread(target=_monitor, daemon=True)
         t.start()
 
-    def run_continuous(self, interval_minutes: int = 3):
+    def run_continuous(self, interval_minutes: int = 3, headless: bool = False):
         """
         持续运行模式
         
         Args:
             interval_minutes: 运行间隔（分钟）
+            headless: 是否为无头模式（不使用 Web Dashboard，在终端显示）
         """
         log.info(f"🚀 Starting continuous mode (interval: {interval_minutes}min)")
         global_state.is_running = True
+        
+        # 🖥️ Headless Mode: Initialize terminal display and configure logging
+        self._headless_mode = headless
+        if headless:
+            from src.cli.terminal_display import get_display
+            self._terminal_display = get_display(self.symbols)
+            self._terminal_display.print_header(test_mode=self.test_mode)
+            
+            # Configure minimal logging for headless mode using a custom filter
+            # This ensures Web Dashboard mode is not affected
+            import logging
+            
+            class HeadlessFilter(logging.Filter):
+                """Filter to suppress verbose logs only in headless mode"""
+                def filter(self, record):
+                    # Only suppress INFO level logs from specific modules
+                    if record.levelno == logging.INFO:
+                        suppressed_modules = [
+                            'src.features.technical_features',
+                            'src.utils.logger',
+                            'src.agents.data_sync_agent',
+                            'src.agents.trend_agent',
+                            'src.agents.setup_agent',
+                            'src.agents.trigger_agent',
+                            'src.strategy.llm_engine',
+                            'src.models.prophet_model',
+                            'src.server.state',
+                            '__main__'
+                        ]
+                        return record.name not in suppressed_modules
+                    return True  # Allow WARNING and above
+            
+            # Add filter to root logger
+            headless_filter = HeadlessFilter()
+            logging.getLogger().addFilter(headless_filter)
+            
+            # Store filter reference for cleanup
+            self._headless_filter = headless_filter
         
         # Logger is configured in src.utils.logger, no need to override here.
         # Dashboard logging is handled via global_state.add_log -> log.bind(dashboard=True)
@@ -2496,9 +2544,13 @@ class MultiAgentTradingBot:
                         pnl=global_state.account_overview['total_pnl']
                     )
                 
-                print(f"\n{'='*80}")
-                print(f"🔄 Cycle #{cycle_num} | 分析 {len(self.symbols)} 个交易对")
-                print(f"{'='*80}")
+                # 🖥️ Headless Mode: Use terminal display
+                if self._headless_mode:
+                    self._terminal_display.print_cycle_start(cycle_num, self.symbols)
+                else:
+                    print(f"\n{'='*80}")
+                    print(f"🔄 Cycle #{cycle_num} | 分析 {len(self.symbols)} 个交易对")
+                    print(f"{'='*80}")
                 global_state.add_log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
                 global_state.add_log(f"[📊 SYSTEM] Cycle #{cycle_num} | {', '.join(self.symbols)}")
 
@@ -2552,11 +2604,24 @@ class MultiAgentTradingBot:
                 if self.test_mode:
                     self._update_virtual_account_stats(latest_prices)
                 
+                # 🖥️ Headless Mode: Print account summary after each cycle
+                if self._headless_mode:
+                    acc = global_state.account_overview
+                    self._terminal_display.print_account_summary(
+                        equity=acc['total_equity'],
+                        available=acc['available_balance'],
+                        pnl=acc['total_pnl'],
+                        initial=global_state.initial_balance
+                    )
+                
                 # Dynamic Interval: specific to new requirement
                 current_interval = global_state.cycle_interval
                 
                 # 等待下一次检查
-                print(f"\n⏳ 等待 {current_interval} 分钟...")
+                if self._headless_mode:
+                    self._terminal_display.print_waiting(current_interval)
+                else:
+                    print(f"\n⏳ 等待 {current_interval} 分钟...")
                 
                 # Sleep in chunks to allow responsive PAUSE/STOP and INTERVAL changes
                 # Check every 1 second during the wait interval
@@ -2585,7 +2650,21 @@ class MultiAgentTradingBot:
                     elapsed_seconds += 1
                 
         except KeyboardInterrupt:
-            print(f"\n\n⚠️  收到停止信号，退出...")
+            if self._headless_mode:
+                # Display shutdown summary
+                stats = {
+                    'cycles': global_state.cycle_counter,
+                    'trades': len(global_state.trade_history),
+                    'total_pnl': global_state.account_overview.get('total_pnl', 0)
+                }
+                self._terminal_display.print_shutdown(stats)
+                
+                # Clean up headless filter
+                import logging
+                if hasattr(self, '_headless_filter'):
+                    logging.getLogger().removeFilter(self._headless_filter)
+            else:
+                print(f"\n\n⚠️  收到停止信号，退出...")
             global_state.is_running = False
 
     def _update_virtual_account_stats(self, latest_prices: Dict[str, float]):
@@ -2668,6 +2747,9 @@ def main():
     parser.add_argument('--skip-auto2', action='store_true', help='在 once 模式跳过 AUTO2 解析')
     parser.add_argument('--mode', choices=['once', 'continuous'], default='continuous', help='运行模式')
     parser.add_argument('--interval', type=float, default=3.0, help='持续运行间隔（分钟）')
+    # CLI Headless Mode
+    parser.add_argument('--headless', action='store_true', help='无头模式：不启动 Web Dashboard，在终端显示实时数据')
+    parser.add_argument('--auto-start', action='store_true', help='自动开始交易（不等待用户点击 Start）')
     
     args = parser.parse_args()
     
@@ -2756,12 +2838,15 @@ def main():
         log.info("🔄 Auto-refresh started (12h interval)")
         log.info("=" * 60)
     
-    # 启动 Dashboard Server (Only if in continuous mode or if explicitly requested, but let's do it always for now if deps exist)
-    try:
-        server_thread = threading.Thread(target=start_server, daemon=True)
-        server_thread.start()
-    except Exception as e:
-        print(f"⚠️ Failed to start Dashboard: {e}")
+    # 启动 Dashboard Server (跳过 headless 模式)
+    if not args.headless:
+        try:
+            server_thread = threading.Thread(target=start_server, daemon=True)
+            server_thread.start()
+        except Exception as e:
+            print(f"⚠️ Failed to start Dashboard: {e}")
+    else:
+        print("🖥️  Headless mode: Web Dashboard disabled")
     
     # 运行
     if args.mode == 'once':
@@ -2777,11 +2862,18 @@ def main():
         # or exit immediately. Usually 'once' implies run and exit.
         
     else:
-        # Default to Stopped - Wait for user to click Start button
-        global_state.execution_mode = "Stopped"
+        # Headless 模式或 --auto-start: 自动开始交易
+        if args.headless or args.auto_start:
+            global_state.execution_mode = "Running"
+            log.info("🚀 Auto-start enabled: Trading begins immediately...")
+        else:
+            # Default to Stopped - Wait for user to click Start button
+            global_state.execution_mode = "Stopped"
+            log.info("🚀 System ready (Stopped). Waiting for user to click Start button...")
+        
         global_state.is_running = True  # Keep event loop running
-        log.info("🚀 System ready (Stopped). Waiting for user to click Start button...")
-        bot.run_continuous(interval_minutes=args.interval)
+        bot.run_continuous(interval_minutes=args.interval, headless=args.headless)
 
 if __name__ == '__main__':
     main()
+

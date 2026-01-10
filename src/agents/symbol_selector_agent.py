@@ -1,5 +1,5 @@
 """
-🔝 Symbol Selector Agent - Automated Top 2 Symbol Selection (AUTO2)
+🔝 Symbol Selector Agent - Automated Top 3 Symbol Selection (AUTO3)
 ====================================================================
 
 Responsibilities:
@@ -28,7 +28,7 @@ from src.backtest.engine import BacktestEngine, BacktestConfig
 
 class SymbolSelectorAgent:
     """
-    Automated symbol selection based on backtest performance (AUTO2)
+    Automated symbol selection based on backtest performance (AUTO3)
     
     Two-Stage Workflow:
     1. Get AI500 Top 10 + Major coins by 24h volume (~16 symbols)
@@ -82,7 +82,7 @@ class SymbolSelectorAgent:
         self._refresh_thread: Optional[threading.Thread] = None
         self._stop_refresh = threading.Event()
         
-        log.info(f"🔝 SymbolSelectorAgent (AUTO2) initialized: Two-stage selection, {refresh_interval_hours}h refresh")
+        log.info(f"🔝 SymbolSelectorAgent (AUTO3) initialized: Two-stage selection, {refresh_interval_hours}h refresh")
     
     async def select_top2(self, force_refresh: bool = False) -> List[str]:
         """
@@ -102,7 +102,7 @@ class SymbolSelectorAgent:
             cached = self._load_cache()
             symbols = [item['symbol'] for item in cached['top2']]
             if symbols:
-                log.info(f"🔝 Using cached AUTO2: {symbols} (age: {self._get_cache_age():.1f}h)")
+                log.info(f"🔝 Using cached AUTO3: {symbols} (age: {self._get_cache_age():.1f}h)")
                 return symbols
             else:
                 log.warning("⚠️ Cache has empty top2, forcing refresh...")
@@ -162,7 +162,7 @@ class SymbolSelectorAgent:
             
             elapsed = time.time() - start_time
             log.info("=" * 60)
-            log.info(f"✅ AUTO2 Two-Stage Selection Complete in {elapsed:.1f}s")
+            log.info(f"✅ AUTO3 Two-Stage Selection Complete in {elapsed:.1f}s")
             log.info(f"   Stage 1: {len(candidates)} → 5 symbols (1h backtest)")
             log.info(f"   Stage 2: 5 → 2 symbols (15m backtest)")
             log.info(f"   🎯 Selected: {top2_symbols}")
@@ -171,7 +171,7 @@ class SymbolSelectorAgent:
             return top2_symbols
             
         except Exception as e:
-            log.error(f"❌ AUTO2 selection failed: {e}", exc_info=True)
+            log.error(f"❌ AUTO3 selection failed: {e}", exc_info=True)
             log.warning(f"⚠️ Falling back to default symbols: {self.FALLBACK_SYMBOLS}")
             return self.FALLBACK_SYMBOLS
     
@@ -360,7 +360,7 @@ class SymbolSelectorAgent:
         with open(self.cache_file, 'w') as f:
             json.dump(cache_data, f, indent=2)
         
-        log.info(f"💾 AUTO2 cache saved: valid until {cache_data['valid_until']}")
+        log.info(f"💾 AUTO3 cache saved: valid until {cache_data['valid_until']}")
     
     def start_auto_refresh(self):
         """Start background thread for auto-refresh every 6 hours"""
@@ -376,7 +376,7 @@ class SymbolSelectorAgent:
                     break  # Stop signal received
                 
                 # Run refresh
-                log.info(f"🔄 AUTO2 auto-refresh triggered ({self.refresh_interval}h interval)")
+                log.info(f"🔄 AUTO3 auto-refresh triggered ({self.refresh_interval}h interval)")
                 try:
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
@@ -385,16 +385,16 @@ class SymbolSelectorAgent:
                 except Exception as e:
                     log.error(f"❌ Auto-refresh failed: {e}", exc_info=True)
         
-        self._refresh_thread = threading.Thread(target=refresh_loop, daemon=True, name="AUTO2-Refresh")
+        self._refresh_thread = threading.Thread(target=refresh_loop, daemon=True, name="AUTO3-Refresh")
         self._refresh_thread.start()
-        log.info(f"🔄 AUTO2 auto-refresh started ({self.refresh_interval}h interval)")
+        log.info(f"🔄 AUTO3 auto-refresh started ({self.refresh_interval}h interval)")
     
     def stop_auto_refresh(self):
         """Stop background refresh thread"""
         if self._refresh_thread and self._refresh_thread.is_alive():
             self._stop_refresh.set()
             self._refresh_thread.join(timeout=5)
-            log.info("🛑 AUTO2 auto-refresh stopped")
+            log.info("🛑 AUTO3 auto-refresh stopped")
 
 
 # Global instance

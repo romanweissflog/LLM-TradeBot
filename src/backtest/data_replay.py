@@ -170,7 +170,11 @@ class DataReplayAgent:
         return pd.Timestamp(end_cutoff).floor("5min").to_pydatetime()
 
     def _cache_covers_range(self) -> bool:
-        """检查缓存是否覆盖完整回测窗口（含多周期）"""
+        """检查缓存是否覆盖完整回测窗口（含多周期）
+        
+        添加容错机制：允许数据有1小时的延迟容差
+        这样可以避免因Binance数据延迟导致的回测失败
+        """
         if self.data_cache is None:
             return False
         df_5m = self.data_cache.df_5m
@@ -188,12 +192,33 @@ class DataReplayAgent:
         end_15m = pd.Timestamp(end_cutoff).floor("15min")
         end_1h = pd.Timestamp(end_cutoff).floor("60min")
 
-        if df_5m.index.min() > start_5m or df_5m.index.max() < end_5m:
+        # 添加容差：允许数据缺失最多1小时（用于处理实时数据延迟）
+        tolerance = pd.Timedelta(hours=1)
+
+        # 检查起始时间（严格）
+        if df_5m.index.min() > start_5m:
             return False
-        if df_15m.index.min() > start_15m or df_15m.index.max() < end_15m:
+        if df_15m.index.min() > start_15m:
             return False
-        if df_1h.index.min() > start_1h or df_1h.index.max() < end_1h:
+        if df_1h.index.min() > start_1h:
             return False
+
+        # 检查结束时间（带容差）
+        if df_5m.index.max() < (end_5m - tolerance):
+            log.warning(f"⚠️ 5m data ends at {df_5m.index.max()}, expected {end_5m} (tolerance: 1h)")
+            return False
+        if df_15m.index.max() < (end_15m - tolerance):
+            log.warning(f"⚠️ 15m data ends at {df_15m.index.max()}, expected {end_15m} (tolerance: 1h)")
+            return False
+        if df_1h.index.max() < (end_1h - tolerance):
+            log.warning(f"⚠️ 1h data ends at {df_1h.index.max()}, expected {end_1h} (tolerance: 1h)")
+            return False
+
+        # 如果数据有缺失但在容差范围内，调整回测结束时间
+        actual_end = min(df_5m.index.max(), df_15m.index.max(), df_1h.index.max())
+        if actual_end < end_5m:
+            log.info(f"📊 Adjusting backtest end time: {self.end_date} → {actual_end} (data availability)")
+            self.end_date = actual_end.to_pydatetime()
 
         return True
     

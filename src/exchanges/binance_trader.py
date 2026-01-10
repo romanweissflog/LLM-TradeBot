@@ -418,13 +418,39 @@ class BinanceTrader(BaseTrader):
         interval: str, 
         limit: int = 500
     ) -> List[Dict[str, Any]]:
-        """Get candlestick data."""
+        """Get candlestick data with local cache priority."""
         self._ensure_initialized()
         
         normalized_symbol = self._normalize_symbol(symbol)
         
         try:
-            # Use futures API for perpetual contracts
+            # Use KlineCache for local-first data fetching
+            from src.utils.kline_cache import get_kline_cache
+            cache = get_kline_cache()
+            
+            # Check cache first
+            cached_df = cache.get_cached_data(normalized_symbol, interval)
+            
+            if cached_df is not None and len(cached_df) >= limit:
+                # Cache sufficient - return cached data
+                log.debug(f"📦 Cache hit: {normalized_symbol}/{interval} | {len(cached_df)} rows")
+                
+                # Convert DataFrame to list of dicts
+                result = []
+                for _, row in cached_df.tail(limit).iterrows():
+                    result.append({
+                        'timestamp': int(row['timestamp']),
+                        'open': float(row['open']),
+                        'high': float(row['high']),
+                        'low': float(row['low']),
+                        'close': float(row['close']),
+                        'volume': float(row['volume']),
+                    })
+                return result
+            
+            # Cache miss or insufficient - fetch from API
+            log.debug(f"📦 Cache miss: {normalized_symbol}/{interval} | Fetching from API")
+            
             klines = self.client.futures_klines(
                 symbol=normalized_symbol,
                 interval=interval,
@@ -446,6 +472,9 @@ class BinanceTrader(BaseTrader):
                     'taker_buy_base': float(k[9]),
                     'taker_buy_quote': float(k[10])
                 })
+            
+            # Save to cache
+            cache.append_data(normalized_symbol, interval, formatted)
             
             return formatted
             

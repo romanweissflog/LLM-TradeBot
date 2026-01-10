@@ -21,13 +21,16 @@ Date: 2025-12-19
 """
 
 # 版本号: v+日期+迭代次数
-VERSION = "v20260111_1"
+VERSION = "v20260111_3"
 
 import asyncio
 import sys
 import os
 from dotenv import load_dotenv
-load_dotenv(override=True) # Ensure .env overrides shell environment
+
+# 加载 .env 文件，但不覆盖已存在的系统环境变量
+# 系统环境变量优先于 .env 文件配置
+load_dotenv(override=False)
 
 # Deployment mode detection: 'local' or 'railway'
 # Railway deployment sets RAILWAY_ENVIRONMENT, use that as detection

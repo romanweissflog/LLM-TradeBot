@@ -7,12 +7,15 @@ import sys
 import os
 import asyncio
 from dotenv import load_dotenv
-load_dotenv(override=True)
+
+# 加载 .env 文件，但不覆盖已存在的系统环境变量
+# 系统环境变量优先于 .env 文件配置
+load_dotenv(override=False)
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '.')))
 
 # 版本号: v+日期+迭代次数
-VERSION = "v20260111_2"
+VERSION = "v20260111_3"
 
 from src.api.binance_client import BinanceClient
 from src.execution.engine import ExecutionEngine

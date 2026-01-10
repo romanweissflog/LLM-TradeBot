@@ -271,7 +271,58 @@ python main.py --test --headless --auto-start --interval 1
   ⏳ Next cycle in 1.0 minutes...
 ```
 
-#### 🔴 Live Trading Mode
+#### 🚀 Simplified CLI Mode (Live Trading)
+
+**For production live trading**, use the simplified CLI script that skips non-essential components:
+
+```bash
+# Activate virtual environment first
+source venv/bin/activate
+
+# Test mode - single run
+python simple_cli.py --mode once
+
+# Test mode - continuous (3-minute intervals)
+python simple_cli.py --mode continuous --interval 3
+
+# LIVE mode - continuous trading (⚠️ REAL MONEY)
+python simple_cli.py --mode continuous --interval 3 --live
+
+# Custom symbols (overrides .env)
+python simple_cli.py --mode continuous --symbols BTCUSDT,ETHUSDT --live
+
+# AUTO3 mode - automatic symbol selection
+python simple_cli.py --mode continuous --symbols AUTO3 --live
+```
+
+**Features**:
+
+- ✅ **Minimal footprint** - only core trading components loaded
+- ✅ **Production-ready** - designed for stable 24/7 operation
+- ✅ **AUTO3 support** - automatic best symbol selection via backtest
+- ✅ **LLM integration** - full multi-agent decision system
+- ✅ **Risk management** - built-in risk audit and position limits
+- ✅ **Graceful shutdown** - Ctrl+C for clean exit
+
+**Configuration**:
+
+The script reads trading symbols from `.env` file by default:
+
+```bash
+# In your .env file
+TRADING_SYMBOLS=BTCUSDT,ETHUSDT
+# Or use AUTO3 for automatic selection
+TRADING_SYMBOLS=AUTO3
+```
+
+**⚠️ Live Trading Prerequisites**:
+
+- Valid Binance Futures API keys in `.env`
+- Sufficient USDT balance in Futures wallet
+- API permissions: Read + Futures Trading enabled
+- DeepSeek/OpenAI API key for LLM decisions
+
+#### 🔴 Live Trading Mode (Web Dashboard)
 
 ⚠️ **WARNING**: Executes real trades on Binance Futures!
 

@@ -123,9 +123,60 @@ python main.py --mode continuous
 
 - **📉 实时 K 线**: 集成 TradingView 组件，1分钟级实时刷新
 - **📈 净值曲线**: 实时账户权益变化追踪
-- **📋 决策审计**: 完整的历史决策记录，包含 Agents 详细评分 (Strategist, Trend, Oscillator, Sentiment)
+- **📋 决策审计**: 完整的历史决策记录,包含 Agents 详细评分 (Strategist, Trend, Oscillator, Sentiment)
 - **📜 交易历史**: 所有交易记录及盈亏统计
 - **📡 Live Log Output**: 实时滚动日志，支持 Agent 标签高亮显示 (Oracle, Strategist, Critic, Guardian)，500行容量历史回溯
+
+#### 5. 简化版 CLI 模式 (实盘交易)
+
+**对于生产环境的实盘交易**，推荐使用简化版 CLI 脚本，跳过非必要组件：
+
+```bash
+# 首先激活虚拟环境
+source venv/bin/activate
+
+# 测试模式 - 单次运行
+python simple_cli.py --mode once
+
+# 测试模式 - 持续运行 (3分钟间隔)
+python simple_cli.py --mode continuous --interval 3
+
+# 实盘模式 - 持续交易 (⚠️ 真实资金)
+python simple_cli.py --mode continuous --interval 3 --live
+
+# 自定义币种 (覆盖 .env 配置)
+python simple_cli.py --mode continuous --symbols BTCUSDT,ETHUSDT --live
+
+# AUTO3 模式 - 自动选币
+python simple_cli.py --mode continuous --symbols AUTO3 --live
+```
+
+**功能特性**:
+
+- ✅ **最小化占用** - 仅加载核心交易组件
+- ✅ **生产就绪** - 专为稳定的 24/7 运行设计
+- ✅ **AUTO3 支持** - 基于回测的自动最佳币种选择
+- ✅ **LLM 集成** - 完整的多 Agent 决策系统
+- ✅ **风险管理** - 内置风控审计和仓位限制
+- ✅ **优雅退出** - Ctrl+C 安全退出
+
+**配置说明**:
+
+脚本默认从 `.env` 文件读取交易币种：
+
+```bash
+# 在 .env 文件中配置
+TRADING_SYMBOLS=BTCUSDT,ETHUSDT
+# 或使用 AUTO3 自动选择
+TRADING_SYMBOLS=AUTO3
+```
+
+**⚠️ 实盘交易前提条件**:
+
+- `.env` 中配置有效的币安合约 API 密钥
+- 合约钱包中有足够的 USDT 余额
+- API 权限：读取 + 合约交易已启用
+- DeepSeek/OpenAI API 密钥用于 LLM 决策
 
 ---
 

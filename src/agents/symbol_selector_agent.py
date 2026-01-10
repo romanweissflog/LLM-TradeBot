@@ -3,15 +3,15 @@
 ====================================================================
 
 Responsibilities:
-1. Get AI500 Top 5 symbols by volume
-2. Backtest each symbol (24h lookback)
-3. Rank by composite profitability score
-4. Auto-select top 2 performers
-5. 12-hour refresh cycle
-6. Startup execution (mandatory)
+1. Get AI500 Top 10 + Major coins by volume
+2. Stage 1: Coarse filter (1h backtest) → Top 5
+3. Stage 2: Fine filter (15m backtest) → Top 2
+4. 6-hour refresh cycle
+5. Startup execution (mandatory)
 
 Author: AI Trader Team
 Date: 2026-01-07
+Updated: 2026-01-10 (Two-stage selection)
 """
 
 import asyncio
@@ -30,13 +30,12 @@ class SymbolSelectorAgent:
     """
     Automated symbol selection based on backtest performance (AUTO2)
     
-    Workflow:
-    1. Get AI500 Top 5 symbols by 24h volume
-    2. Run backtests on each symbol
-    3. Rank by composite score
-    4. Select top 2 performers
-    5. Cache results for 12 hours
-    6. Auto-refresh every 12 hours
+    Two-Stage Workflow:
+    1. Get AI500 Top 10 + Major coins by 24h volume (~16 symbols)
+    2. Stage 1: Coarse filter (1h backtest, step=12) → Top 5
+    3. Stage 2: Fine filter (15m backtest, step=3) → Top 2
+    4. Cache results for 6 hours
+    5. Auto-refresh every 6 hours
     """
     
     # AI500 Candidate Pool (30+ AI/Data/Compute coins)
@@ -49,13 +48,16 @@ class SymbolSelectorAgent:
         "ACTUSDT", "GOATUSDT", "TURBOUSDT", "PNUTUSDT"
     ]
     
-    FALLBACK_SYMBOLS = ["FETUSDT", "RENDERUSDT"]  # Top 2 fallback
+    # Major coins to include alongside AI500
+    MAJOR_COINS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT"]
+    
+    FALLBACK_SYMBOLS = ["BTCUSDT", "ETHUSDT"]  # Top 2 fallback
     
     def __init__(
         self,
         candidate_symbols: Optional[List[str]] = None,
         cache_dir: str = "config",
-        refresh_interval_hours: int = 12,
+        refresh_interval_hours: int = 6,
         lookback_hours: int = 24
     ):
         """
@@ -64,10 +66,11 @@ class SymbolSelectorAgent:
         Args:
             candidate_symbols: List of symbols to evaluate (default: 20 symbols)
             cache_dir: Directory for cache storage
-            refresh_interval_hours: Auto-refresh interval (default: 12h)
+            refresh_interval_hours: Auto-refresh interval (default: 6h)
             lookback_hours: Backtest lookback period (default: 24h)
         """
         self.ai500_candidates = self.AI500_CANDIDATES
+        self.major_coins = self.MAJOR_COINS
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.cache_file = self.cache_dir / "auto_top2_cache.json"
@@ -79,11 +82,14 @@ class SymbolSelectorAgent:
         self._refresh_thread: Optional[threading.Thread] = None
         self._stop_refresh = threading.Event()
         
-        log.info(f"🔝 SymbolSelectorAgent (AUTO2) initialized: AI500 Top5 -> Top2, {refresh_interval_hours}h refresh")
+        log.info(f"🔝 SymbolSelectorAgent (AUTO2) initialized: Two-stage selection, {refresh_interval_hours}h refresh")
     
     async def select_top2(self, force_refresh: bool = False) -> List[str]:
         """
-        Select top 2 symbols based on backtest performance from AI500 Top 5
+        Select top 2 symbols using two-stage filtering
+        
+        Stage 1: Coarse filter (1h backtest) on ~16 symbols → Top 5
+        Stage 2: Fine filter (15m backtest) on Top 5 → Top 2
         
         Args:
             force_refresh: Force re-run backtests even if cache valid
@@ -101,28 +107,66 @@ class SymbolSelectorAgent:
             else:
                 log.warning("⚠️ Cache has empty top2, forcing refresh...")
         
-        # Step 1: Get AI500 Top 5 by volume
-        log.info("🔄 Getting AI500 Top 5 by 24h volume...")
-        ai500_top5 = await self._get_ai500_top5()
-        log.info(f"📊 AI500 Top 5: {ai500_top5}")
-        
-        # Step 2: Backtest each symbol
-        log.info(f"🔄 Running AUTO2 backtests on {len(ai500_top5)} symbols...")
         start_time = time.time()
         
         try:
-            results = await self._run_backtests(ai500_top5)
-            ranked = self._rank_symbols(results)
+            # ============================================================
+            # STAGE 1: Coarse Filter (1h backtest) → Top 5
+            # ============================================================
+            log.info("=" * 60)
+            log.info("🔄 STAGE 1: Coarse Filter (1h backtest)")
+            log.info("=" * 60)
             
-            # Get top 2
-            top2_data = ranked[:2]
+            # Get AI500 Top 10 + Major coins
+            candidates = await self._get_expanded_candidates()
+            log.info(f"📊 Candidates ({len(candidates)}): {candidates}")
+            
+            # Run 1h backtests (step=12, faster)
+            stage1_results = await self._run_backtests_stage(
+                symbols=candidates,
+                step=12,  # 1-hour intervals
+                stage_name="Stage 1"
+            )
+            
+            # Rank and get Top 5
+            ranked_stage1 = self._rank_symbols(stage1_results)
+            top5_symbols = [item['symbol'] for item in ranked_stage1[:5]]
+            
+            log.info(f"✅ Stage 1 complete: Top 5 = {top5_symbols}")
+            
+            # ============================================================
+            # STAGE 2: Fine Filter (15m backtest) → Top 2
+            # ============================================================
+            log.info("=" * 60)
+            log.info("🔄 STAGE 2: Fine Filter (15m backtest)")
+            log.info("=" * 60)
+            
+            # Run 15m backtests on Top 5 (step=3, more precise)
+            stage2_results = await self._run_backtests_stage(
+                symbols=top5_symbols,
+                step=3,  # 15-minute intervals
+                stage_name="Stage 2"
+            )
+            
+            # Rank and get Top 2
+            ranked_stage2 = self._rank_symbols(stage2_results)
+            top2_data = ranked_stage2[:2]
             top2_symbols = [item['symbol'] for item in top2_data]
             
-            # Save to cache
-            self._save_cache(top2_data, results)
+            # Save to cache (include both stages for reference)
+            self._save_cache(top2_data, {
+                "stage1_results": stage1_results,
+                "stage2_results": stage2_results,
+                "top5": top5_symbols
+            })
             
             elapsed = time.time() - start_time
-            log.info(f"✅ AUTO2 selected in {elapsed:.1f}s: {top2_symbols}")
+            log.info("=" * 60)
+            log.info(f"✅ AUTO2 Two-Stage Selection Complete in {elapsed:.1f}s")
+            log.info(f"   Stage 1: {len(candidates)} → 5 symbols (1h backtest)")
+            log.info(f"   Stage 2: 5 → 2 symbols (15m backtest)")
+            log.info(f"   🎯 Selected: {top2_symbols}")
+            log.info("=" * 60)
             
             return top2_symbols
             
@@ -131,8 +175,8 @@ class SymbolSelectorAgent:
             log.warning(f"⚠️ Falling back to default symbols: {self.FALLBACK_SYMBOLS}")
             return self.FALLBACK_SYMBOLS
     
-    async def _get_ai500_top5(self) -> List[str]:
-        """Get AI500 Top 5 symbols by 24h volume"""
+    async def _get_expanded_candidates(self) -> List[str]:
+        """Get AI500 Top 10 + Major coins by 24h volume"""
         try:
             from src.api.binance_client import BinanceClient
             
@@ -149,19 +193,33 @@ class SymbolSelectorAgent:
                     except (ValueError, TypeError):
                         pass
             
-            # Sort by volume descending
+            # Sort by volume descending and get Top 10
             ai_stats.sort(key=lambda x: x[1], reverse=True)
+            ai500_top10 = [x[0] for x in ai_stats[:10]]
             
-            # Return top 5
-            return [x[0] for x in ai_stats[:5]]
+            # Combine with major coins (avoid duplicates)
+            candidates = list(ai500_top10)
+            for coin in self.major_coins:
+                if coin not in candidates:
+                    candidates.append(coin)
+            
+            log.info(f"📊 AI500 Top 10: {ai500_top10}")
+            log.info(f"📊 + Major coins: {self.major_coins}")
+            
+            return candidates
             
         except Exception as e:
-            log.error(f"Failed to get AI500 Top5: {e}")
-            # Fallback to first 5 candidates
-            return self.ai500_candidates[:5]
+            log.error(f"Failed to get expanded candidates: {e}")
+            # Fallback: first 10 AI500 + majors
+            return self.ai500_candidates[:10] + self.major_coins
     
-    async def _run_backtests(self, symbols: List[str]) -> List[Dict]:
-        """Run backtests on provided symbol list"""
+    async def _run_backtests_stage(
+        self,
+        symbols: List[str],
+        step: int,
+        stage_name: str
+    ) -> List[Dict]:
+        """Run backtests for a specific stage"""
         end_time = datetime.now()
         start_time = end_time - timedelta(hours=self.lookback_hours)
         
@@ -169,9 +227,9 @@ class SymbolSelectorAgent:
         total = len(symbols)
         
         for i, symbol in enumerate(symbols):
-            log.info(f"🔄 [{i+1}/{total}] Backtesting {symbol}...")
+            log.info(f"🔄 [{stage_name}] [{i+1}/{total}] Backtesting {symbol}...")
             try:
-                result = await self._backtest_symbol(symbol, start_time, end_time)
+                result = await self._backtest_symbol(symbol, start_time, end_time, step)
                 if result:
                     valid_results.append(result)
                     log.info(f"   ✅ {symbol}: Return {result['total_return']:+.2f}%, Trades {result['trades']}")
@@ -184,7 +242,8 @@ class SymbolSelectorAgent:
         self,
         symbol: str,
         start_time: datetime,
-        end_time: datetime
+        end_time: datetime,
+        step: int = 12
     ) -> Optional[Dict]:
         """Run backtest for a single symbol using thread executor"""
         try:
@@ -195,7 +254,7 @@ class SymbolSelectorAgent:
                 initial_capital=10000.0,
                 strategy_mode="technical",  # Use simple mode for speed
                 use_llm=False,
-                step=12  # 1-hour intervals (faster than 5m)
+                step=step
             )
             
             # Run sync backtest in thread executor to avoid blocking
@@ -284,15 +343,18 @@ class SymbolSelectorAgent:
         with open(self.cache_file, 'r') as f:
             return json.load(f)
     
-    def _save_cache(self, top2: List[Dict], all_results: List[Dict]):
+    def _save_cache(self, top2: List[Dict], all_results: Dict):
         """Save results to cache"""
         now = datetime.now()
         cache_data = {
             "timestamp": now.isoformat(),
             "valid_until": (now + timedelta(hours=self.refresh_interval)).isoformat(),
             "lookback_hours": self.lookback_hours,
+            "selection_method": "two_stage",
             "top2": top2,
-            "all_results": all_results
+            "top5": all_results.get("top5", []),
+            "stage1_results": all_results.get("stage1_results", []),
+            "stage2_results": all_results.get("stage2_results", [])
         }
         
         with open(self.cache_file, 'w') as f:
@@ -301,7 +363,7 @@ class SymbolSelectorAgent:
         log.info(f"💾 AUTO2 cache saved: valid until {cache_data['valid_until']}")
     
     def start_auto_refresh(self):
-        """Start background thread for auto-refresh every 12 hours"""
+        """Start background thread for auto-refresh every 6 hours"""
         if self._refresh_thread and self._refresh_thread.is_alive():
             log.warning("Auto-refresh thread already running")
             return

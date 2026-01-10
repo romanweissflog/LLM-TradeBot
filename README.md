@@ -24,7 +24,7 @@ Intelligent Multi-Agent Quantitative Trading Bot based on the **Adversarial Deci
 
 - 🕵️ **Perception First**: Unlike strict indicator-based systems, this framework prioritizes judging "IF we should trade" before deciding "HOW to trade".
 - 🤖 **Multi-Agent Collaboration**: 12 highly specialized Agents operating independently to form an adversarial verification chain.
-- 🔝 **AUTO2 Dynamic Symbol Selection**: Automatic symbol selection based on 24h backtest performance - AI picks the best coins to trade.
+- 🔝 **AUTO2 Two-Stage Symbol Selection**: Intelligent symbol selection using two-stage filtering - Stage 1 (1h backtest) filters AI500 Top10 + Majors to Top 5, Stage 2 (15m backtest) refines to Top 2.
 - 🧠 **Multi-LLM Support**: Seamlessly switch between DeepSeek, OpenAI, Claude, Qwen, and Gemini via Dashboard settings.
 - 📊 **Multi-Account Trading**: Manage multiple exchange accounts with unified API abstraction (currently Binance, extensible).
 - ⚡ **Async Concurrency**: Currently fetches multi-timeframe data (5m/15m/1h) concurrently, ensuring data alignment at the snapshot moment.
@@ -436,7 +436,7 @@ The system uses a **Four-Layer Strategy Filter** architecture with 13 specialize
 
 | Agent | Role | Responsibility |
 |-------|------|----------------|
-| **🔝 SymbolSelectorAgent** | AUTO2 Selector | Backtest-based dynamic symbol selection from AI500 Top 5 → Top 2 performers |
+| **🔝 SymbolSelectorAgent** | AUTO2 Selector | Two-stage backtest selection: AI500 Top10 + Majors → Top 5 (1h) → Top 2 (15m) |
 
 #### Data Layer Agents
 
@@ -665,11 +665,11 @@ data/
 
 **2026-01-07**:
 
-- ✅ **AUTO2 Dynamic Symbol Selection**: New `SymbolSelectorAgent` that automatically selects the best trading symbols.
-  - Gets AI500 Top 5 coins by 24h trading volume
-  - Runs backtests on each symbol (24h lookback)
-  - Ranks by composite score: Return (30%) + Sharpe (20%) + Win Rate (25%) + Drawdown (15%) + Trade Frequency (10%)
-  - Auto-selects Top 2 performers with 12-hour cache refresh
+- ✅ **AUTO2 Two-Stage Symbol Selection**: Enhanced `SymbolSelectorAgent` with two-stage filtering.
+  - **Stage 1 (Coarse Filter)**: 1h backtest on AI500 Top10 + Major coins (~16 symbols) → Top 5
+  - **Stage 2 (Fine Filter)**: 15m backtest on Top 5 → Top 2 performers
+  - Expanded candidate pool: AI500 (30+ AI/Data coins) + Majors (BTC, ETH, SOL, BNB, XRP, DOGE)
+  - Auto-refresh every 6 hours with smart caching
 - ✅ **BacktestAgentRunner Parity**: Full consistency between backtest and live trading environments.
   - Risk Audit Agent integrated into backtest flow
   - Four-Layer Strategy Filter applied in backtests

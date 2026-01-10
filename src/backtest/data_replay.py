@@ -20,6 +20,7 @@ import os
 from src.api.binance_client import BinanceClient
 from src.agents.data_sync_agent import MarketSnapshot
 from src.utils.logger import log
+from src.utils.kline_cache import get_kline_cache
 
 
 @dataclass
@@ -97,6 +98,9 @@ class DataReplayAgent:
         
         # 确保缓存目录存在
         os.makedirs(self.CACHE_DIR, exist_ok=True)
+        
+        # Initialize shared K-line cache for incremental fetching
+        self._kline_cache = get_kline_cache()
         
         log.info(f"📼 DataReplayAgent initialized | {symbol} | {self.start_date} to {self.end_date}")
     
@@ -255,9 +259,10 @@ class DataReplayAgent:
         log.info(f"   Lookback: {lookback_days} days before backtest start")
         
         # Binance API 限制单次最多 1500 根，需要分批获取
-        df_5m = await self._fetch_klines_batched("5m", limit_5m)
-        df_15m = await self._fetch_klines_batched("15m", limit_15m)
-        df_1h = await self._fetch_klines_batched("1h", limit_1h)
+        # Use KlineCache for local-first fetching
+        df_5m = await self._fetch_klines_with_cache("5m", limit_5m)
+        df_15m = await self._fetch_klines_with_cache("15m", limit_15m)
+        df_1h = await self._fetch_klines_with_cache("1h", limit_1h)
         
         # 获取资金费率历史
         funding_rates = await self._fetch_funding_rates()
@@ -338,6 +343,123 @@ class DataReplayAgent:
             log.warning(f"⚠️ Failed to fetch funding rates: {e}")
         
         return funding_records
+    
+    async def _fetch_klines_with_cache(self, interval: str, total_limit: int) -> pd.DataFrame:
+        """
+        Fetch K-lines using local cache first, then API for missing data
+        
+        Optimization: Prioritize local parquet cache, only fetch incremental data from API
+        
+        Args:
+            interval: K-line interval ('5m', '15m', '1h')
+            total_limit: Total number of K-lines needed
+            
+        Returns:
+            DataFrame with K-line data
+        """
+        # Check cache for existing data
+        cached_df = self._kline_cache.get_cached_data(self.symbol, interval)
+        
+        if cached_df is not None and not cached_df.empty:
+            # Cache exists - check coverage
+            cache_start = cached_df['timestamp'].min() if 'timestamp' in cached_df.columns else None
+            cache_end = cached_df['timestamp'].max() if 'timestamp' in cached_df.columns else None
+            
+            # Calculate lookback period
+            lookback_days = 30
+            extended_start = self.start_date - timedelta(days=lookback_days)
+            extended_start_ms = self._utc_timestamp_ms(extended_start)
+            end_ms = self._utc_timestamp_ms(self.end_date)
+            
+            # Check if cache covers our range
+            if cache_start is not None and cache_end is not None:
+                cache_start_ms = int(cache_start)
+                cache_end_ms = int(cache_end)
+                
+                if cache_start_ms <= extended_start_ms and cache_end_ms >= end_ms:
+                    # Cache fully covers range
+                    log.info(f"📦 Cache hit: {self.symbol}/{interval} | Using cached data")
+                    
+                    # Filter to needed range and convert to proper format
+                    df = cached_df.copy()
+                    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+                    df.set_index('timestamp', inplace=True)
+                    
+                    for col in ['open', 'high', 'low', 'close', 'volume']:
+                        if col in df.columns:
+                            df[col] = pd.to_numeric(df[col], errors='coerce')
+                    
+                    return df
+                else:
+                    # Cache partial - fetch missing data
+                    log.info(f"📦 Cache partial: {self.symbol}/{interval} | Fetching additional data")
+                    
+                    # Determine what to fetch
+                    if cache_end_ms < end_ms:
+                        # Need newer data
+                        await self._fetch_and_append_to_cache(interval, cache_end_ms + 1, end_ms)
+                    
+                    if cache_start_ms > extended_start_ms:
+                        # Need older data - use batched fetch
+                        old_df = await self._fetch_klines_batched(interval, total_limit)
+                        if not old_df.empty:
+                            # Convert and append
+                            old_df_reset = old_df.reset_index()
+                            old_df_reset['timestamp'] = old_df_reset['timestamp'].astype('int64') // 10**6
+                            self._kline_cache.append_data(self.symbol, interval, old_df_reset.to_dict('records'))
+                    
+                    # Get updated cache
+                    updated_df = self._kline_cache.get_cached_data(self.symbol, interval)
+                    if updated_df is not None:
+                        df = updated_df.copy()
+                        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+                        df.set_index('timestamp', inplace=True)
+                        for col in ['open', 'high', 'low', 'close', 'volume']:
+                            if col in df.columns:
+                                df[col] = pd.to_numeric(df[col], errors='coerce')
+                        return df
+        
+        # No cache or insufficient - full fetch via API
+        log.info(f"📦 Cache miss: {self.symbol}/{interval} | Fetching from API")
+        df = await self._fetch_klines_batched(interval, total_limit)
+        
+        # Save to cache
+        if not df.empty:
+            df_for_cache = df.reset_index()
+            df_for_cache['timestamp'] = df_for_cache['timestamp'].astype('int64') // 10**6
+            self._kline_cache.append_data(self.symbol, interval, df_for_cache.to_dict('records'))
+        
+        return df
+    
+    async def _fetch_and_append_to_cache(self, interval: str, start_ms: int, end_ms: int):
+        """Fetch K-lines from API and append to cache"""
+        try:
+            klines = self.client.client.futures_klines(
+                symbol=self.symbol,
+                interval=interval,
+                startTime=start_ms,
+                endTime=end_ms,
+                limit=1000
+            )
+            
+            if klines:
+                # Convert to cache format
+                klines_dict = []
+                for k in klines:
+                    klines_dict.append({
+                        'timestamp': k[0],
+                        'open': float(k[1]),
+                        'high': float(k[2]),
+                        'low': float(k[3]),
+                        'close': float(k[4]),
+                        'volume': float(k[5]),
+                    })
+                
+                self._kline_cache.append_data(self.symbol, interval, klines_dict)
+                log.debug(f"📦 Appended {len(klines_dict)} rows to {self.symbol}/{interval} cache")
+                
+        except Exception as e:
+            log.warning(f"Failed to fetch incremental data: {e}")
     
     async def _fetch_klines_batched(self, interval: str, total_limit: int) -> pd.DataFrame:
         """分批获取 K 线数据"""

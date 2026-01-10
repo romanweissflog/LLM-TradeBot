@@ -21,6 +21,7 @@ from src.api.binance_client import BinanceClient
 from src.api.quant_client import quant_client
 from src.utils.logger import log
 from src.utils.oi_tracker import oi_tracker
+from src.utils.kline_cache import get_kline_cache
 
 
 @dataclass
@@ -96,6 +97,10 @@ class DataSyncAgent:
             log.info("📡 Using REST API mode (WebSocket disabled)")
         
         self.last_snapshot = None
+        
+        # Initialize K-line cache for incremental fetching
+        self._kline_cache = get_kline_cache()
+        
         log.info("🕵️ The Oracle (DataSync Agent) initialized")
     
     async def fetch_all_timeframes(
@@ -170,43 +175,22 @@ class DataSyncAgent:
                 b_oi = {} # Mock empty OI
 
         if not ws_enabled or not self._initial_load_complete.get(symbol_key) or use_rest_fallback:
-            # REST API 模式或首次加载 / 回退模式
+            # Get event loop for concurrent operations
             loop = asyncio.get_event_loop()
             
-            tasks = [
-                loop.run_in_executor(
-                    None,
-                    self.client.get_klines,
-                    symbol, '5m', limit
-                ),
-                loop.run_in_executor(
-                    None,
-                    self.client.get_klines,
-                    symbol, '15m', limit
-                ),
-                loop.run_in_executor(
-                    None,
-                    self.client.get_klines,
-                    symbol, '1h', limit
-                ),
-                quant_client.fetch_coin_data(symbol),
-                loop.run_in_executor(
-                    None,
-                    self.client.get_funding_rate_with_cache,
-                    symbol
-                ),
-                # loop.run_in_executor(
-                #     None,
-                #     self.client.get_open_interest,
-                #     symbol
-                # )
-            ]
+            # Fetch with incremental caching
+            k5m = await self._fetch_with_cache(symbol_key, '5m', limit)
+            k15m = await self._fetch_with_cache(symbol_key, '15m', limit)
+            k1h = await self._fetch_with_cache(symbol_key, '1h', limit)
             
-            # 等待所有请求完成
-            # k5m, k15m, k1h, q_data, b_funding, b_oi = await asyncio.gather(*tasks)
-            results = await asyncio.gather(*tasks)
-            k5m, k15m, k1h, q_data, b_funding = results
-            b_oi = {} # Mock empty OI
+            # Fetch external data concurrently
+            q_data = await quant_client.fetch_coin_data(symbol)
+            b_funding = await loop.run_in_executor(
+                None,
+                self.client.get_funding_rate_with_cache,
+                symbol
+            )
+            b_oi = {}  # Mock empty OI
             
             log.info(f"[{symbol}] Data fetched: 5m={len(k5m)}, 15m={len(k15m)}, 1h={len(k1h)}")
             
@@ -268,6 +252,67 @@ class DataSyncAgent:
         
         return snapshot
     
+    async def _fetch_with_cache(self, symbol: str, interval: str, limit: int) -> List[Dict]:
+        """
+        Fetch K-line data with incremental caching
+        
+        1. Check cache for existing data
+        2. If cache sufficient, fetch only new data since last timestamp
+        3. Append new data to cache and return combined result
+        
+        Args:
+            symbol: Trading pair (e.g., 'BTCUSDT')
+            interval: Timeframe ('5m', '15m', '1h')
+            limit: Minimum number of K-lines needed
+            
+        Returns:
+            List of K-line dicts
+        """
+        loop = asyncio.get_event_loop()
+        
+        # Check cache
+        last_ts = self._kline_cache.get_last_timestamp(symbol, interval)
+        cached_df = self._kline_cache.get_cached_data(symbol, interval)
+        
+        if cached_df is not None and len(cached_df) >= limit and last_ts:
+            # Cache sufficient - fetch only new data
+            interval_ms = {
+                '1m': 60 * 1000,
+                '5m': 5 * 60 * 1000,
+                '15m': 15 * 60 * 1000,
+                '1h': 60 * 60 * 1000,
+            }.get(interval, 5 * 60 * 1000)
+            
+            start_time = last_ts + interval_ms
+            
+            # Fetch only new K-lines
+            new_klines = await loop.run_in_executor(
+                None,
+                lambda: self.client.get_klines(symbol, interval, 50, start_time=start_time)
+            )
+            
+            if new_klines:
+                # Append to cache
+                self._kline_cache.append_data(symbol, interval, new_klines)
+                log.debug(f"📦 Cache hit: {symbol}/{interval} | +{len(new_klines)} new")
+            
+            # Return from updated cache
+            final_df = self._kline_cache.get_cached_data(symbol, interval)
+            if final_df is not None and not final_df.empty:
+                # Convert back to list of dicts for compatibility
+                return final_df.tail(limit).to_dict('records')
+            
+        # Cache miss or insufficient - full fetch
+        klines = await loop.run_in_executor(
+            None,
+            lambda: self.client.get_klines(symbol, interval, limit)
+        )
+        
+        if klines:
+            self._kline_cache.append_data(symbol, interval, klines)
+            log.debug(f"📦 Cache miss: {symbol}/{interval} | Fetched {len(klines)} rows")
+        
+        return klines
     def _to_dataframe(self, klines: List[Dict]) -> pd.DataFrame:
         """
         将K线列表转换为DataFrame

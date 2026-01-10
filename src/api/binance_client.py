@@ -37,7 +37,7 @@ class BinanceClient:
         
         log.info(f"Binance client initialized (testnet: {self.testnet})")
     
-    def get_klines(self, symbol: str, interval: str, limit: int = 500) -> List[Dict]:
+    def get_klines(self, symbol: str, interval: str, limit: int = 500, start_time: int = None) -> List[Dict]:
         """
         获取K线数据
         
@@ -45,19 +45,24 @@ class BinanceClient:
             symbol: 交易对，如 'BTCUSDT'
             interval: 时间周期，如 '1m', '5m', '15m', '1h'
             limit: 数量限制
+            start_time: 起始时间戳(毫秒), 用于增量获取
             
         Returns:
             K线数据列表
         """
         try:
-            # Debug log before call
-            # log.debug(f"[API] Requesting klines: {symbol} {interval} limit={limit}")
+            # Build params
+            params = {
+                'symbol': symbol,
+                'interval': interval,
+                'limit': limit
+            }
             
-            klines = self.client.get_klines(
-                symbol=symbol,
-                interval=interval,
-                limit=limit
-            )
+            # Add startTime for incremental fetch
+            if start_time:
+                params['startTime'] = start_time
+            
+            klines = self.client.get_klines(**params)
             
             # Critical debug for Railway issue
             if len(klines) < 10:

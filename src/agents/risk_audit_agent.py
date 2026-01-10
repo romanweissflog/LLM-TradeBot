@@ -171,10 +171,10 @@ class RiskAuditAgent:
                     return self._block_decision('total_blocks', f"市场高波动(ATR {regime.get('atr_pct', 0):.2f}%)，风险控制拦截")
                 warnings.append(f"⚠️ 市场高波动(ATR {regime.get('atr_pct', 0):.2f}%)，谨慎开仓")
             if r_type == 'choppy':
-                if confidence < 65:
-                    return self._block_decision('total_blocks', f"震荡市信心不足({confidence:.1f} < 65)，拦截开仓")
-                if confidence < 75:
-                    warnings.append(f"⚠️ 震荡市信心一般({confidence:.1f} < 75)，谨慎开仓")
+                if confidence < 70:  # Optimized: was 65
+                    return self._block_decision('total_blocks', f"震荡市信心不足({confidence:.1f} < 70)，拦截开仓")
+                if confidence < 80:  # Optimized: was 75
+                    warnings.append(f"⚠️ 震荡市信心一般({confidence:.1f} < 80)，谨慎开仓")
 
         regime_name = str((decision.get('regime') or {}).get('regime', '')).lower()
         trend_scores = decision.get('trend_scores') or {}
@@ -243,8 +243,8 @@ class RiskAuditAgent:
 
             if location == 'middle' or 40 <= pos_pct <= 60:
                 if not ((is_short and short_strong_setup and short_pos_pct >= short_pos_threshold) or (is_long and long_strong_setup)):
-                    # 🔧 OPTIMIZATION Priority 3: Widen price zones (80% → 70%)
-                    if confidence < 70:  # Was 80
+                    # 🔧 OPTIMIZATION: Increase middle zone threshold 70% → 75%
+                    if confidence < 75:  # Was 70
                         return self._block_decision('total_blocks', f"价格处于区间中部({pos_pct:.1f}%)，R/R极差，禁止开仓")
                     warnings.append(f"⚠️ 价格处于区间中部({pos_pct:.1f}%)，R/R偏弱，谨慎开仓")
             

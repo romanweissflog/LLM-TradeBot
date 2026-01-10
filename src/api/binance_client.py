@@ -64,8 +64,8 @@ class BinanceClient:
             
             klines = self.client.get_klines(**params)
             
-            # Critical debug for Railway issue
-            if len(klines) < 10:
+            # Only warn about low kline count for full fetches (not incremental)
+            if len(klines) < 10 and start_time is None:
                 log.warning(f"[API] Low kline count for {symbol} {interval}: requested={limit}, returned={len(klines)}")
             
             # 格式化数据

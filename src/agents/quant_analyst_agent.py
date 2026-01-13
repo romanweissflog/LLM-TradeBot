@@ -19,7 +19,7 @@ from dataclasses import asdict
 
 from src.agents.data_sync_agent import MarketSnapshot
 from src.utils.logger import log
-from src.agents.regime_detector import RegimeDetector
+from src.agents.regime_detector_agent import RegimeDetector
 import numpy as np
 
 

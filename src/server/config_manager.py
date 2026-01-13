@@ -48,7 +48,8 @@ class ConfigManager:
             "llm": {
                 "provider": env_vars.get('LLM_PROVIDER', 'deepseek'),
                 "model": env_vars.get('DEEPSEEK_MODEL', 'deepseek-chat')
-            }
+            },
+            "agents": self._get_agents_config()
         }
 
     def update_config(self, updates: Dict[str, Any], railway_mode: bool = False) -> bool:
@@ -140,12 +141,79 @@ class ConfigManager:
                 f.writelines(new_lines)
                 
             print(f"[ConfigManager] Config updated successfully: {list(flat_updates.keys())}")
+            
+            # === Handle agents config ===
+            if 'agents' in updates and isinstance(updates['agents'], dict):
+                self._update_agents_config(updates['agents'])
+            
             return True
         except Exception as e:
             print(f"[ConfigManager] Error updating config: {e}")
             import traceback
             traceback.print_exc()
             return False
+    
+    def _update_agents_config(self, agents: Dict[str, Any]) -> bool:
+        """Update agents configuration in config.yaml"""
+        import yaml
+        try:
+            config_yaml_path = os.path.join(self.root_dir, 'config.yaml')
+            
+            # Read existing config.yaml
+            config_data = {}
+            if os.path.exists(config_yaml_path):
+                with open(config_yaml_path, 'r', encoding='utf-8') as f:
+                    config_data = yaml.safe_load(f) or {}
+            
+            # Update agents section
+            config_data['agents'] = agents
+            
+            # Write back to config.yaml
+            with open(config_yaml_path, 'w', encoding='utf-8') as f:
+                yaml.dump(config_data, f, default_flow_style=False, allow_unicode=True)
+            
+            # Also set environment variables for immediate effect
+            for agent_name, enabled in agents.items():
+                env_key = f"AGENT_{agent_name.upper()}"
+                os.environ[env_key] = 'true' if enabled else 'false'
+            
+            print(f"[ConfigManager] Agents config updated: {list(agents.keys())}")
+            return True
+        except Exception as e:
+            print(f"[ConfigManager] Error updating agents config: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def _get_agents_config(self) -> Dict[str, bool]:
+        """Read agents configuration from config.yaml, return defaults if not found"""
+        import yaml
+        
+        # Default values (all optional agents enabled by default for this UI)
+        defaults = {
+            "predict_agent": True,
+            "ai_prediction_filter_agent": True,
+            "regime_detector_agent": True,
+            "position_analyzer_agent": True,
+            "trigger_detector_agent": True,
+            "trend_agent": True,
+            "trigger_agent": True,
+            "reflection_agent": True,
+            "symbol_selector_agent": True
+        }
+        
+        try:
+            config_yaml_path = os.path.join(self.root_dir, 'config.yaml')
+            if os.path.exists(config_yaml_path):
+                with open(config_yaml_path, 'r', encoding='utf-8') as f:
+                    config_data = yaml.safe_load(f) or {}
+                agents = config_data.get('agents', {})
+                # Merge with defaults (config values override defaults)
+                return {**defaults, **agents}
+        except Exception as e:
+            print(f"[ConfigManager] Error reading agents config: {e}")
+        
+        return defaults
 
     def get_prompt(self) -> str:
         """Get current custom prompt or empty string"""

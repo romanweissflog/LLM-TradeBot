@@ -128,7 +128,7 @@ class StrategyComposer:
             result['layer1_pass'] = True
             
             # Layer 2: AI Filter
-            from src.agents.ai_filter import AIPredictionFilter
+            from src.agents.ai_prediction_filter_agent import AIPredictionFilter
             ai_filter = AIPredictionFilter()
             ai_check = ai_filter.check_divergence(trend_1h, predict_result)
             

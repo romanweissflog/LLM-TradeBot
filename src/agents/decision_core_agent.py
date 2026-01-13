@@ -22,8 +22,8 @@ import json
 import pandas as pd
 
 from src.utils.logger import log
-from src.agents.position_analyzer import PositionAnalyzer
-from src.agents.regime_detector import RegimeDetector
+from src.agents.position_analyzer_agent import PositionAnalyzer
+from src.agents.regime_detector_agent import RegimeDetector
 from src.agents.predict_agent import PredictResult
 
 

@@ -56,3 +56,27 @@ backtest:
   start_date: "2024-01-01"
   end_date: "2024-12-01"
   initial_capital: 10000
+
+# Agent 配置 (可选 Agent 开关)
+# Core agents (DataSyncAgent, QuantAnalystAgent, RiskAuditAgent) 始终启用
+agents:
+  # ML/AI 预测层
+  predict_agent: true              # ML 概率预测
+  ai_prediction_filter_agent: true # AI 否决机制 (依赖 predict_agent)
+  
+  # 市场分析
+  regime_detector_agent: true      # 市场状态检测 (趋势/震荡/高波动)
+  position_analyzer_agent: false   # 价格位置分析 (区间位置)
+  
+  # 触发检测
+  trigger_detector_agent: true     # 5m K线模式检测
+  
+  # LLM 语义分析 (消耗 API 额度，默认关闭)
+  trend_agent: false               # 1h 趋势 LLM 分析
+  trigger_agent: false             # 5m 触发 LLM 分析
+  
+  # 交易反思
+  reflection_agent: true           # 每 10 笔交易后 LLM 反思
+  
+  # 选币
+  symbol_selector_agent: false     # AUTO3 自动选币 (需要回测)

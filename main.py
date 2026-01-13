@@ -71,7 +71,7 @@ from src.exchanges import AccountManager, ExchangeAccount, ExchangeType  # ✅ M
 from src.features.technical_features import TechnicalFeatureEngineer
 from src.server.state import global_state
 from src.utils.semantic_converter import SemanticConverter  # ✅ Global Import
-from src.agents.regime_detector import RegimeDetector  # ✅ Market Regime Detection
+from src.agents.regime_detector_agent import RegimeDetector  # ✅ Market Regime Detection
 from src.config import Config # Re-added Config as it's used later
 
 # FastAPI dependencies
@@ -246,6 +246,14 @@ class MultiAgentTradingBot:
         
         # 初始化共享 Agent (与币种无关)
         print("\n🚀 Initializing agents...")
+        
+        # 🆕 Load Agent Configuration
+        from src.agents.agent_config import AgentConfig
+        agents_config = self.config.get('agents', {})
+        self.agent_config = AgentConfig.from_dict({'agents': agents_config})
+        print(f"  📋 Agent Config: {self.agent_config}")
+        
+        # Core Agents (always enabled)
         self.data_sync_agent = DataSyncAgent(self.client)
         self.quant_analyst = QuantAnalystAgent()
         # self.decision_core = DecisionCoreAgent() # Deprecated in DeepSeek Mode
@@ -261,24 +269,32 @@ class MultiAgentTradingBot:
         print("[DEBUG] Creating TechnicalFeatureEngineer...")
         self.feature_engineer = TechnicalFeatureEngineer()  # 🔮 特征工程器 for Prophet
         print("[DEBUG] TechnicalFeatureEngineer created")
-        # 🔧 FIX M4: Cache RegimeDetector to avoid per-cycle reinstantiation
-        print("[DEBUG] Importing RegimeDetector...")
-        from src.agents.regime_detector import RegimeDetector
-        print("[DEBUG] Creating RegimeDetector...")
-        self.regime_detector = RegimeDetector()  # 📊 市场状态检测器
-        print("[DEBUG] RegimeDetector created")
         
-        # 🔮 为每个币种创建独立的 PredictAgent
-        print("[DEBUG] Creating PredictAgents...")
+        # 🆕 Optional Agent: RegimeDetectorAgent
+        self.regime_detector = None
+        if self.agent_config.regime_detector_agent:
+            print("[DEBUG] Creating RegimeDetector...")
+            from src.agents.regime_detector_agent import RegimeDetector
+            self.regime_detector = RegimeDetector()
+            print("[DEBUG] RegimeDetector created")
+            print("  ✅ RegimeDetectorAgent ready")
+        else:
+            print("  ⏭️ RegimeDetectorAgent disabled")
+        
+        # 🆕 Optional Agent: PredictAgent (per symbol)
         self.predict_agents = {}
-        for symbol in self.symbols:
-            print(f"[DEBUG] Creating PredictAgent for {symbol}...")
-            self.predict_agents[symbol] = PredictAgent(horizon='30m', symbol=symbol)
-            print(f"[DEBUG] PredictAgent for {symbol} created")
+        if self.agent_config.predict_agent:
+            print("[DEBUG] Creating PredictAgents...")
+            for symbol in self.symbols:
+                print(f"[DEBUG] Creating PredictAgent for {symbol}...")
+                self.predict_agents[symbol] = PredictAgent(horizon='30m', symbol=symbol)
+                print(f"[DEBUG] PredictAgent for {symbol} created")
+            print(f"  ✅ PredictAgent ready ({len(self.symbols)} symbols)")
+        else:
+            print("  ⏭️ PredictAgent disabled")
         
         print("  ✅ DataSyncAgent ready")
         print("  ✅ QuantAnalystAgent ready")
-        print(f"  ✅ PredictAgent ready ({len(self.symbols)} symbols)")
         print("  ✅ RiskAuditAgent ready")
         
         # 🧠 DeepSeek 决策引擎
@@ -290,11 +306,15 @@ class MultiAgentTradingBot:
         else:
             print("  ⚠️ DeepSeek StrategyEngine not ready (Awaiting API Key)")
             
-        # 🧠 Reflection Agent - 交易反思
-        print("[DEBUG] Creating ReflectionAgent...")
-        self.reflection_agent = ReflectionAgent()
-        print("[DEBUG] ReflectionAgent created")
-        print("  ✅ ReflectionAgent ready")
+        # 🆕 Optional Agent: ReflectionAgent
+        self.reflection_agent = None
+        if self.agent_config.reflection_agent:
+            print("[DEBUG] Creating ReflectionAgent...")
+            self.reflection_agent = ReflectionAgent()
+            print("[DEBUG] ReflectionAgent created")
+            print("  ✅ ReflectionAgent ready")
+        else:
+            print("  ⏭️ ReflectionAgent disabled")
         
         print(f"\n⚙️  Trading Config:")
         print(f"  - Symbols: {', '.join(self.symbols)}")
@@ -900,26 +920,41 @@ class MultiAgentTradingBot:
             sent_score = quant_analysis.get('sentiment', {}).get('total_sentiment_score', 0)
             global_state.add_log(f"[👨‍🔬 STRATEGIST] Trend={trend_score:+.0f} | Osc={osc_score:+.0f} | Sent={sent_score:+.0f}")
             
-            # Step 2.5: Prophet
-            if not (hasattr(self, '_headless_mode') and self._headless_mode):
-                print("[Step 2.5/5] 🔮 The Prophet (Predict Agent) - Calculating probability...")
-            df_15m_features = self.feature_engineer.build_features(processed_dfs['15m'])
-            if not df_15m_features.empty:
-                latest = df_15m_features.iloc[-1].to_dict()
-                predict_features = {k: v for k, v in latest.items() if isinstance(v, (int, float)) and not isinstance(v, bool)}
+            # Step 2.5: Prophet (Optional - skip if PredictAgent disabled)
+            predict_result = None
+            if self.agent_config.predict_agent and self.current_symbol in self.predict_agents:
+                if not (hasattr(self, '_headless_mode') and self._headless_mode):
+                    print("[Step 2.5/5] 🔮 The Prophet (Predict Agent) - Calculating probability...")
+                df_15m_features = self.feature_engineer.build_features(processed_dfs['15m'])
+                if not df_15m_features.empty:
+                    latest = df_15m_features.iloc[-1].to_dict()
+                    predict_features = {k: v for k, v in latest.items() if isinstance(v, (int, float)) and not isinstance(v, bool)}
+                else:
+                     predict_features = {}
+                
+                predict_result = await self.predict_agents[self.current_symbol].predict(predict_features)
+                global_state.prophet_probability = predict_result.probability_up
+                
+                # LOG 3: Prophet (The Prophet)
+                p_up_pct = predict_result.probability_up * 100
+                direction = "↗UP" if predict_result.probability_up > 0.55 else ("↘DN" if predict_result.probability_up < 0.45 else "➖NEU")
+                global_state.add_log(f"[🔮 PROPHET] P(Up)={p_up_pct:.1f}% {direction}")
+                
+                # Save Prediction
+                self.saver.save_prediction(asdict(predict_result), self.current_symbol, snapshot_id, cycle_id=cycle_id)
             else:
-                 predict_features = {}
-            
-            predict_result = await self.predict_agents[self.current_symbol].predict(predict_features)
-            global_state.prophet_probability = predict_result.probability_up
-            
-            # LOG 3: Prophet (The Prophet)
-            p_up_pct = predict_result.probability_up * 100
-            direction = "↗UP" if predict_result.probability_up > 0.55 else ("↘DN" if predict_result.probability_up < 0.45 else "➖NEU")
-            global_state.add_log(f"[🔮 PROPHET] P(Up)={p_up_pct:.1f}% {direction}")
-            
-            # Save Prediction
-            self.saver.save_prediction(asdict(predict_result), self.current_symbol, snapshot_id, cycle_id=cycle_id)
+                # PredictAgent disabled - use neutral defaults
+                from src.agents.predict_agent import PredictResult
+                predict_result = PredictResult(
+                    probability_up=0.5,
+                    probability_down=0.5,
+                    confidence=0.0,
+                    horizon='30m',
+                    factors={},
+                    model_type='disabled'
+                )
+                global_state.prophet_probability = 0.5
+                global_state.add_log(f"[🔮 PROPHET] Disabled - using neutral (50%)")
             
             # === 🎯 FOUR-LAYER STRATEGY FILTERING ===
             if not (hasattr(self, '_headless_mode') and self._headless_mode):
@@ -936,9 +971,13 @@ class MultiAgentTradingBot:
             if funding_rate is None: funding_rate = 0
             
             # 🆕 Get ADX from RegimeDetector for trend strength validation
-            # 🔧 FIX M4: Use cached regime_detector instead of creating new instance
+            # RegimeDetector is optional - use safe defaults if disabled
             df_1h = processed_dfs['1h']
-            regime_result = self.regime_detector.detect_regime(df_1h) if len(df_1h) >= 20 else {'adx': 20, 'regime': 'unknown'}
+            if self.regime_detector and len(df_1h) >= 20:
+                regime_result = self.regime_detector.detect_regime(df_1h)
+            else:
+                # RegimeDetector disabled or insufficient data - use neutral defaults
+                regime_result = {'adx': 20, 'regime': 'unknown', 'confidence': 0}
             adx_value = regime_result.get('adx', 20)
             
             # Initialize filter results with enhanced fields
@@ -1077,30 +1116,44 @@ class MultiAgentTradingBot:
                     fuel_strength = 'Strong' if abs(oi_change) > 3.0 else 'Moderate'
                 log.info(f"✅ Layer 1 PASS: {trend_1h.upper()} trend + {fuel_strength} Fuel (OI {oi_change:+.1f}%)")
                 
-                # Layer 2: AI Prediction Filter
-                from src.agents.ai_filter import AIPredictionFilter
-                ai_filter = AIPredictionFilter()
-                ai_check = ai_filter.check_divergence(trend_1h, predict_result)
-                
-                four_layer_result['ai_check'] = ai_check
-                
-                # 🆕 AI PREDICTION INVALIDATION: When ADX < 5, any directional AI prediction is noise
-                if adx_value < 5:
-                    ai_check['ai_invalidated'] = True
-                    ai_check['original_signal'] = ai_check.get('ai_signal', 'unknown')
-                    ai_check['ai_signal'] = 'INVALID (ADX<5)'
-                    four_layer_result['ai_prediction_note'] = f"AI prediction invalidated: ADX={adx_value:.0f} (<5), directional signals are statistically meaningless"
-                    log.warning(f"⚠️ AI prediction invalidated: ADX={adx_value:.0f} is too low for any directional signal to be reliable")
-                
-                if ai_check['ai_veto']:
-                    four_layer_result['blocking_reason'] = ai_check['reason']
-                    log.warning(f"🚫 Layer 2 VETO: {ai_check['reason']}")
-                else:
-                    four_layer_result['layer2_pass'] = True
-                    four_layer_result['confidence_boost'] = ai_check['confidence_boost']
-                    log.info(f"✅ Layer 2 PASS: AI {ai_check['ai_signal']} (boost: {ai_check['confidence_boost']:+d}%)")
+                # Layer 2: AI Prediction Filter (Optional - skip if disabled)
+                if self.agent_config.ai_prediction_filter_agent and self.agent_config.predict_agent:
+                    from src.agents.ai_prediction_filter_agent import AIPredictionFilter
+                    ai_filter = AIPredictionFilter()
+                    ai_check = ai_filter.check_divergence(trend_1h, predict_result)
                     
-                    # Layer 3: 15m Setup (Specification: KDJ + Bollinger Bands)
+                    four_layer_result['ai_check'] = ai_check
+                    
+                    # 🆕 AI PREDICTION INVALIDATION: When ADX < 5, any directional AI prediction is noise
+                    if adx_value < 5:
+                        ai_check['ai_invalidated'] = True
+                        ai_check['original_signal'] = ai_check.get('ai_signal', 'unknown')
+                        ai_check['ai_signal'] = 'INVALID (ADX<5)'
+                        four_layer_result['ai_prediction_note'] = f"AI prediction invalidated: ADX={adx_value:.0f} (<5), directional signals are statistically meaningless"
+                        log.warning(f"⚠️ AI prediction invalidated: ADX={adx_value:.0f} is too low for any directional signal to be reliable")
+                    
+                    if ai_check['ai_veto']:
+                        four_layer_result['blocking_reason'] = ai_check['reason']
+                        log.warning(f"🚫 Layer 2 VETO: {ai_check['reason']}")
+                    else:
+                        four_layer_result['layer2_pass'] = True
+                        four_layer_result['confidence_boost'] = ai_check['confidence_boost']
+                        log.info(f"✅ Layer 2 PASS: AI {ai_check['ai_signal']} (boost: {ai_check['confidence_boost']:+d}%)")
+                else:
+                    # AIPredictionFilterAgent disabled - auto-pass Layer 2
+                    four_layer_result['layer2_pass'] = True
+                    four_layer_result['ai_check'] = {
+                        'allow_trade': True,
+                        'reason': 'AIPredictionFilter disabled',
+                        'confidence_boost': 0,
+                        'ai_veto': False,
+                        'ai_signal': 'disabled',
+                        'ai_confidence': 0
+                    }
+                    log.info(f"⏭️ Layer 2 SKIP: AIPredictionFilterAgent disabled")
+                
+                # Layer 3: 15m Setup (only if Layer 2 passed)
+                if four_layer_result['layer2_pass']:
                     df_15m = processed_dfs['15m']
                     if len(df_15m) < 20:
                         log.warning(f"⚠️ Insufficient 15m data: {len(df_15m)} bars")
@@ -1176,7 +1229,7 @@ class MultiAgentTradingBot:
                         log.info(f"✅ Layer 3 PASS: 15m setup ready")
                         
                         # Layer 4: 5min Trigger + Sentiment Risk (Specification Module 4)
-                        from src.agents.trigger_detector import TriggerDetector
+                        from src.agents.trigger_detector_agent import TriggerDetector
                         trigger_detector = TriggerDetector()
                         
                         df_5m = processed_dfs['5m']
@@ -1597,7 +1650,7 @@ class MultiAgentTradingBot:
                 'trend_5m_score': trend_data.get('trend_5m_score', 0)
             }
             try:
-                from src.agents.position_analyzer import PositionAnalyzer
+                from src.agents.position_analyzer_agent import PositionAnalyzer
                 df_1h = processed_dfs.get('1h')
                 if df_1h is not None and len(df_1h) > 5:
                     analyzer = PositionAnalyzer()

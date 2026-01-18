@@ -3,6 +3,7 @@
    ============================================================ */
 
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap');
 
 :root {
     /* NoFX Neo-Gold Color Palette */
@@ -63,6 +64,7 @@
     /* Premium Fonts */
     --font-mono: 'IBM Plex Mono', 'JetBrains Mono', 'SF Mono', Monaco, monospace;
     --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-display: 'Space Grotesk', 'IBM Plex Mono', sans-serif;
 
     /* Shadows & Glow Effects */
     --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.2);
@@ -2059,34 +2061,110 @@ tr:first-child td {
 /* Framework Container */
 .row-agent-framework {
     width: 100%;
-    min-height: 500px;
+    min-height: 560px;
+    position: relative;
 }
 
 .agent-framework-card {
-    padding: 20px 24px;
+    padding: 24px 24px 26px;
     width: 100%;
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+    background:
+        radial-gradient(circle at 8% 0%, rgba(0, 240, 255, 0.12), transparent 40%),
+        radial-gradient(circle at 92% 100%, rgba(240, 185, 11, 0.15), transparent 45%),
+        var(--panel-bg);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: var(--shadow-lg);
+}
+
+.agent-framework-card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+        linear-gradient(120deg, rgba(255, 255, 255, 0.03), transparent 55%),
+        radial-gradient(circle at 30% 20%, rgba(0, 240, 255, 0.08), transparent 50%);
+    opacity: 0.7;
+    pointer-events: none;
+}
+
+.agent-framework-card::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image:
+        linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    background-size: 36px 36px;
+    opacity: 0.25;
+    pointer-events: none;
 }
 
 .agent-framework-card .card-header {
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-start;
     padding-bottom: 16px;
     border-bottom: 1px solid var(--panel-border);
     margin-bottom: 20px;
+    position: relative;
+    z-index: 1;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.agent-framework-layout {
+    position: relative;
+    z-index: 1;
+}
+
+.framework-title-block {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
 }
 
 .agent-framework-card .card-header h2 {
     margin: 0;
     padding: 0;
     border: none;
-    font-size: 1.1rem;
+    font-size: 1.35rem;
+    font-family: var(--font-display);
+    letter-spacing: 0.02em;
+}
+
+.framework-title {
+    color: var(--nofx-text);
+}
+
+.framework-subtitle {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--nofx-text-muted);
+    margin: 0;
+    font-family: var(--font-display);
 }
 
 .framework-controls {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 12px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    position: relative;
+    z-index: 1;
+}
+
+.framework-grid {
+    display: grid;
+    grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
+    gap: 22px;
+    align-items: start;
+    position: relative;
+    z-index: 1;
 }
 
 .cycle-badge {
@@ -2095,18 +2173,21 @@ tr:first-child td {
     padding: 6px 12px;
     background: var(--nofx-gold-dim);
     border: 1px solid rgba(240, 185, 11, 0.3);
-    border-radius: 8px;
+    border-radius: 999px;
     color: var(--nofx-gold);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
 }
 
 .demo-flow-btn {
     padding: 8px 20px;
     background: linear-gradient(135deg, rgba(0, 214, 143, 0.15) 0%, rgba(0, 214, 143, 0.05) 100%);
     border: 1px solid rgba(0, 214, 143, 0.3);
-    border-radius: 8px;
+    border-radius: 999px;
     color: var(--accent-green);
     font-size: 0.9rem;
     font-weight: 600;
+    font-family: var(--font-display);
     cursor: pointer;
     transition: all 0.3s ease;
 }
@@ -2127,49 +2208,130 @@ tr:first-child td {
 .agent-flow-container {
     display: flex;
     flex-direction: column;
-    gap: 0;
-    padding: 20px 0;
+    gap: 14px;
+    padding: 18px;
+    border-radius: 16px;
+    background:
+        linear-gradient(180deg, rgba(8, 11, 15, 0.7), rgba(5, 7, 10, 0.9)),
+        rgba(8, 11, 15, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+    position: relative;
+}
+
+.agent-flow-container::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(rgba(0, 240, 255, 0.08) 1px, transparent 1px);
+    background-size: 18px 18px;
+    opacity: 0.15;
+    pointer-events: none;
+}
+
+.agent-flow-container > * {
+    position: relative;
+    z-index: 1;
 }
 
 /* Flow Layer */
 .flow-layer {
     display: flex;
     flex-direction: column;
-    align-items: center;
     gap: 12px;
+    padding: 14px 16px;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.03), rgba(0, 0, 0, 0.15));
+    position: relative;
+    overflow: hidden;
+    animation: frameworkRise 0.6s ease both;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+}
+
+.flow-layer::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-left: 2px solid var(--layer-accent, var(--nofx-gold));
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.flow-layer-row {
+    display: grid;
+    grid-template-columns: minmax(120px, 160px) minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+    position: relative;
+    z-index: 1;
+}
+
+.flow-layer[data-layer="data"] {
+    --layer-accent: var(--nofx-accent);
+}
+
+.flow-layer[data-layer="analysis"] {
+    --layer-accent: var(--nofx-gold);
+}
+
+.flow-layer[data-layer="strategy"] {
+    --layer-accent: var(--nofx-success);
+}
+
+.flow-layer[data-layer="decision"] {
+    --layer-accent: #9cc9ff;
+}
+
+.flow-layer[data-layer="execution"] {
+    --layer-accent: var(--nofx-danger);
 }
 
 .layer-label {
-    font-size: 0.8rem;
+    font-size: 0.72rem;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 1px;
-    color: var(--nofx-gold);
-    background: var(--nofx-gold-dim);
-    padding: 6px 16px;
-    border-radius: 20px;
-    border: 1px solid rgba(240, 185, 11, 0.2);
-    margin-bottom: 8px;
+    letter-spacing: 0.18em;
+    color: var(--layer-accent, var(--nofx-gold));
+    background: rgba(255, 255, 255, 0.04);
+    padding: 8px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    font-family: var(--font-display);
+    text-align: center;
 }
 
 .layer-agents {
-    display: flex;
-    justify-content: center;
-    gap: 20px;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 14px;
+    align-items: stretch;
 }
 
 /* Agent Box */
 .agent-box {
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: linear-gradient(145deg, rgba(7, 10, 14, 0.6), rgba(12, 16, 22, 0.4));
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 12px;
     padding: 14px 18px;
-    min-width: 170px;
-    max-width: 220px;
+    min-width: 0;
+    max-width: none;
+    width: 100%;
     transition: all 0.3s ease;
     cursor: grab;
     user-select: none;
+    position: relative;
+    overflow: hidden;
+}
+
+.agent-box::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(120deg, rgba(255, 255, 255, 0.05), transparent 60%);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
 }
 
 .agent-box:active {
@@ -2188,6 +2350,10 @@ tr:first-child td {
     transform: translateY(-3px);
     box-shadow: 0 6px 25px rgba(240, 185, 11, 0.2);
     border-color: rgba(240, 185, 11, 0.5);
+}
+
+.agent-box:hover::after {
+    opacity: 1;
 }
 
 .agent-box.running {
@@ -2219,6 +2385,8 @@ tr:first-child td {
     font-weight: 600;
     color: var(--text-primary);
     flex: 1;
+    font-family: var(--font-display);
+    letter-spacing: 0.02em;
 }
 
 .agent-badge {
@@ -2278,8 +2446,10 @@ tr:first-child td {
 
 /* Decision Core Special */
 .agent-box.decision-core {
-    min-width: 250px;
-    max-width: 300px;
+    min-width: 0;
+    max-width: none;
+    background: linear-gradient(135deg, rgba(15, 20, 26, 0.7), rgba(9, 12, 16, 0.5));
+    border-color: rgba(156, 201, 255, 0.35);
 }
 
 .decision-output {
@@ -2339,9 +2509,9 @@ tr:first-child td {
 
 /* Final Output Box */
 .agent-box.final-output {
-    background: linear-gradient(135deg, rgba(240, 185, 11, 0.1) 0%, rgba(0, 240, 255, 0.05) 100%);
-    border-color: rgba(240, 185, 11, 0.4);
-    box-shadow: 0 0 20px var(--nofx-gold-dim);
+    background: linear-gradient(135deg, rgba(240, 185, 11, 0.18) 0%, rgba(0, 240, 255, 0.1) 100%);
+    border-color: rgba(240, 185, 11, 0.45);
+    box-shadow: 0 0 20px rgba(240, 185, 11, 0.2);
 }
 
 .final-result {
@@ -2377,14 +2547,15 @@ tr:first-child td {
     display: flex;
     flex-direction: column;
     align-items: center;
-    height: 40px;
+    height: 32px;
     position: relative;
+    z-index: 1;
 }
 
 .flow-line {
-    width: 2px;
+    width: 1.5px;
     height: 100%;
-    background: linear-gradient(180deg, var(--nofx-gold-glow) 0%, var(--nofx-accent-glow) 100%);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.3), rgba(0, 240, 255, 0.08));
 }
 
 .flow-particles {
@@ -2414,6 +2585,18 @@ tr:first-child td {
     }
 }
 
+@keyframes frameworkRise {
+    0% {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
 @keyframes badgePulse {
 
     0%,
@@ -2430,10 +2613,12 @@ tr:first-child td {
 .flow-legend {
     display: flex;
     justify-content: center;
-    gap: 24px;
+    gap: 16px;
+    flex-wrap: wrap;
     padding-top: 16px;
     border-top: 1px solid rgba(255, 255, 255, 0.05);
     margin-top: 16px;
+    grid-column: 1 / -1;
 }
 
 .legend-item {
@@ -2641,22 +2826,48 @@ tr:first-child td {
    ======================================== */
 
 .agent-selection-panel {
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: linear-gradient(180deg, rgba(9, 12, 16, 0.85), rgba(5, 7, 10, 0.92));
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
+    padding: 16px;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+    position: sticky;
+    top: 16px;
+}
+
+.agent-selection-title {
+    font-size: 0.85rem;
+    color: var(--nofx-gold);
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-display);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+
+.agent-checkbox-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
 }
 
 .agent-checkbox-item {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 8px;
-    border-radius: 6px;
+    padding: 8px 10px;
+    border-radius: 10px;
     cursor: pointer;
-    transition: background 0.2s;
+    transition: background 0.2s, border 0.2s, transform 0.2s;
+    border: 1px solid rgba(255, 255, 255, 0.04);
 }
 
 .agent-checkbox-item:hover {
-    background: rgba(255, 255, 255, 0.05);
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(240, 185, 11, 0.2);
+    transform: translateX(2px);
 }
 
 .agent-checkbox-item input[type="checkbox"] {
@@ -2676,12 +2887,29 @@ tr:first-child td {
 }
 
 .apply-agents-btn {
+    width: 100%;
+    padding: 10px 12px;
+    background: linear-gradient(135deg, rgba(240, 185, 11, 0.95), rgba(240, 185, 11, 0.7));
+    color: #0b0f14;
+    border: 1px solid rgba(240, 185, 11, 0.6);
+    border-radius: 10px;
+    font-weight: 700;
+    font-family: var(--font-display);
+    letter-spacing: 0.04em;
+    cursor: pointer;
     transition: all 0.2s;
 }
 
 .apply-agents-btn:hover {
-    background: #d4a507 !important;
+    background: linear-gradient(135deg, rgba(255, 210, 80, 0.95), rgba(240, 185, 11, 0.8));
     transform: translateY(-1px);
+    box-shadow: 0 10px 25px rgba(240, 185, 11, 0.25);
+}
+
+.agent-selection-actions {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 /* Current Symbol Badge */
@@ -2690,10 +2918,32 @@ tr:first-child td {
     align-items: center;
     gap: 4px;
     padding: 6px 12px;
-    background: rgba(240, 185, 11, 0.15);
-    border: 1px solid rgba(240, 185, 11, 0.3);
-    border-radius: 6px;
-    font-size: 0.85rem;
+    background: rgba(0, 240, 255, 0.12);
+    border: 1px solid rgba(0, 240, 255, 0.35);
+    border-radius: 999px;
+    font-size: 0.82rem;
     font-weight: 600;
-    color: var(--nofx-gold);
+    color: #9defff;
+    font-family: var(--font-display);
+    letter-spacing: 0.04em;
+}
+
+@media (max-width: 1200px) {
+    .framework-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .agent-selection-panel {
+        position: static;
+    }
+}
+
+@media (max-width: 900px) {
+    .flow-layer-row {
+        grid-template-columns: 1fr;
+    }
+
+    .layer-label {
+        justify-self: start;
+    }
 }

@@ -1464,35 +1464,36 @@ function updateAgentFramework(system, decision, agents) {
         setOutput('out-selector-symbol', '--');
         setOutput('out-selector-score', '--');
         setSummary('sum-symbol-selector', 'Selector off.');
-    } else if (isRunningMode) {
-        setAgentStatus('flow-symbol-selector', 'Done');
-        const selectorMode = Array.isArray(system.symbols) && system.symbols.length > 1 ? 'AUTO' : 'MANUAL';
+    } else {
+        const selectorSymbols = Array.isArray(system.symbols) ? system.symbols : [];
+        const selectorMode = selectorSymbols.length > 1 ? 'AUTO' : 'MANUAL';
+        const selectorSymbol = decision.symbol || (selectorSymbols.length > 0 ? selectorSymbols[0] : '--');
+
+        if (isRunningMode) {
+            setAgentStatus('flow-symbol-selector', 'Done');
+        } else {
+            setAgentStatus('flow-symbol-selector', 'Idle');
+        }
+
         setOutput('out-selector-mode', selectorMode);
-        setOutput('out-selector-symbol', decision.symbol || '--');
+        setOutput('out-selector-symbol', selectorSymbol);
         setOutput('out-selector-score', '--');
-        const symbolText = decision.symbol || '--';
-        setSummary('sum-symbol-selector', `${selectorMode} -> ${symbolText}.`);
+        setSummary('sum-symbol-selector', `${selectorMode} -> ${selectorSymbol}.`);
 
         // 🆕 Update K-line chart when AUTO1 symbol changes
-        if (decision.symbol && decision.symbol !== window.lastChartSymbol) {
-            window.lastChartSymbol = decision.symbol;
+        if (selectorSymbol !== '--' && selectorSymbol !== window.lastChartSymbol) {
+            window.lastChartSymbol = selectorSymbol;
             if (typeof loadTradingViewChart === 'function') {
-                loadTradingViewChart(decision.symbol);
-                console.log('📈 K-line chart updated to:', decision.symbol);
+                loadTradingViewChart(selectorSymbol);
+                console.log('📈 K-line chart updated to:', selectorSymbol);
             }
         }
 
         // 🆕 Update current symbol display in framework header
         const symbolDisplayText = document.getElementById('symbol-display-text');
-        if (symbolDisplayText && decision.symbol) {
-            symbolDisplayText.textContent = decision.symbol;
+        if (symbolDisplayText && selectorSymbol !== '--') {
+            symbolDisplayText.textContent = selectorSymbol;
         }
-    } else {
-        setAgentStatus('flow-symbol-selector', 'Idle');
-        setOutput('out-selector-mode', '--');
-        setOutput('out-selector-symbol', '--');
-        setOutput('out-selector-score', '--');
-        setSummary('sum-symbol-selector', 'Selector idle.');
     }
 
     // 🆕 Trigger Detector Agent

@@ -2927,10 +2927,39 @@ class MultiAgentTradingBot:
                 cycle_num = global_state.cycle_counter
                 cycle_id = f"cycle_{cycle_num:04d}_{int(time.time())}"
                 global_state.current_cycle_id = cycle_id
-                
+
                 # 🧹 Clear initialization logs when Cycle 1 starts (sync with Recent Decisions)
                 if cycle_num == 1:
                     global_state.clear_init_logs()
+
+                # 🔝 Symbol Selector Agent must run first in cycle 1 (if enabled)
+                if cycle_num == 1 and self.agent_config.symbol_selector_agent:
+                    try:
+                        log.info("🎰 SymbolSelectorAgent (Cycle 1) running before analysis...")
+                        global_state.add_log("[🎰 SELECTOR] Cycle 1 symbol selection started")
+                        selector = get_selector()
+                        top_symbols = asyncio.run(selector.select_top3(force_refresh=False))
+
+                        if top_symbols:
+                            self.symbols = top_symbols
+                            self.current_symbol = top_symbols[0]
+                            global_state.symbols = top_symbols
+
+                            if self.agent_config.predict_agent:
+                                for symbol in top_symbols:
+                                    if symbol not in self.predict_agents:
+                                        self.predict_agents[symbol] = PredictAgent(horizon='30m', symbol=symbol)
+                                        log.info(f"🆕 Initialized PredictAgent for {symbol} (Selector)")
+
+                            selector.start_auto_refresh()
+                            log.info(f"✅ SymbolSelectorAgent ready: {', '.join(top_symbols)}")
+                            global_state.add_log(f"[🎰 SELECTOR] Selected: {', '.join(top_symbols)}")
+                        else:
+                            log.warning("⚠️ SymbolSelectorAgent returned empty selection")
+                            global_state.add_log("[🎰 SELECTOR] Empty selection (fallback to configured symbols)")
+                    except Exception as e:
+                        log.error(f"❌ SymbolSelectorAgent failed: {e}")
+                        global_state.add_log(f"[🎰 SELECTOR] Failed: {e}")
                 
                 # 🧪 Test Mode: Record start of cycle account state (for Net Value Curve)
                 if self.test_mode:

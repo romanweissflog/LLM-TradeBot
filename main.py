@@ -345,6 +345,7 @@ class MultiAgentTradingBot:
         else:
             global_state.trade_history = []
             print("  🧪 Test mode: No history loaded, showing only current session")
+        self._sync_open_positions_to_trade_history()
 
     def _reload_symbols(self):
         """Reload trading symbols from environment/config without restart"""
@@ -393,6 +394,16 @@ class MultiAgentTradingBot:
     def _run_symbol_selector(self, reason: str = "scheduled") -> None:
         """Run symbol selector and update symbols (AUTO1/AUTO3)."""
         if not self.agent_config.symbol_selector_agent:
+            return
+
+        active_symbols = self._get_active_position_symbols()
+        if active_symbols:
+            locked = [s for s in self.symbols if s in active_symbols]
+            if not locked:
+                locked = sorted(set(active_symbols))
+            log.info(f"🔒 SymbolSelectorAgent skipped (active positions: {', '.join(locked)})")
+            global_state.add_log(f"[🔒 SELECTOR] Skipped: active positions ({', '.join(locked)})")
+            self.selector_last_run = time.time()
             return
 
         selector_started = time.time()
@@ -464,6 +475,135 @@ class MultiAgentTradingBot:
             global_state.add_log(f"[🎰 SELECTOR] Failed: {e}")
         finally:
             self.selector_last_run = selector_started
+
+    def _get_active_position_symbols(self) -> List[str]:
+        """Return symbols with active positions (test + live)."""
+        if self.test_mode:
+            active = []
+            for symbol, pos in (global_state.virtual_positions or {}).items():
+                try:
+                    qty = float(pos.get('quantity', 0) or 0)
+                except (TypeError, ValueError):
+                    qty = 0
+                if abs(qty) > 0:
+                    active.append(symbol)
+            return active
+
+        try:
+            account = self.client.get_futures_account()
+            positions = account.get('positions', []) or []
+            active = []
+            for pos in positions:
+                amt = pos.get('positionAmt')
+                if amt is None:
+                    amt = pos.get('position_amt', 0)
+                try:
+                    if abs(float(amt)) > 0:
+                        symbol = pos.get('symbol')
+                        if symbol:
+                            active.append(symbol)
+                except (TypeError, ValueError):
+                    continue
+            return active
+        except Exception as e:
+            log.warning(f"Failed to fetch active positions: {e}")
+            return []
+
+    def _sync_open_positions_to_trade_history(self) -> None:
+        """Ensure open positions appear in trade history for the UI."""
+        def has_open_record(symbol: str) -> bool:
+            for trade in global_state.trade_history:
+                if trade.get('symbol') != symbol:
+                    continue
+                exit_price = trade.get('exit_price')
+                if exit_price in (None, "", "N/A"):
+                    return True
+                try:
+                    if float(exit_price) == 0:
+                        return True
+                except (TypeError, ValueError):
+                    return True
+            return False
+
+        added = []
+        if self.test_mode:
+            for symbol, pos in (global_state.virtual_positions or {}).items():
+                try:
+                    qty = float(pos.get('quantity', 0) or 0)
+                except (TypeError, ValueError):
+                    qty = 0
+                if abs(qty) == 0 or has_open_record(symbol):
+                    continue
+                side = (pos.get('side') or '').upper()
+                action = f"OPEN_{side}" if side else "OPEN"
+                entry_price = float(pos.get('entry_price', 0) or 0)
+                trade_record = {
+                    'open_cycle': 0,
+                    'close_cycle': 0,
+                    'timestamp': pos.get('entry_time') or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    'action': action,
+                    'symbol': symbol,
+                    'entry_price': entry_price,
+                    'quantity': qty,
+                    'cost': entry_price * qty,
+                    'exit_price': 0,
+                    'pnl': 0.0,
+                    'confidence': 'N/A',
+                    'status': 'OPEN (SYNC)',
+                    'cycle': global_state.current_cycle_id or 'N/A'
+                }
+                global_state.trade_history.insert(0, trade_record)
+                added.append(symbol)
+        else:
+            try:
+                account = self.client.get_futures_account()
+                positions = account.get('positions', []) or []
+            except Exception as e:
+                log.warning(f"Failed to sync live positions: {e}")
+                positions = []
+            for pos in positions:
+                amt = pos.get('positionAmt')
+                if amt is None:
+                    amt = pos.get('position_amt', 0)
+                try:
+                    amt_val = float(amt)
+                except (TypeError, ValueError):
+                    continue
+                if abs(amt_val) == 0:
+                    continue
+                symbol = pos.get('symbol')
+                if not symbol or has_open_record(symbol):
+                    continue
+                side = "LONG" if amt_val > 0 else "SHORT"
+                entry_price = pos.get('entryPrice') or pos.get('entry_price') or 0
+                try:
+                    entry_price = float(entry_price)
+                except (TypeError, ValueError):
+                    entry_price = 0.0
+                qty = abs(amt_val)
+                trade_record = {
+                    'open_cycle': 0,
+                    'close_cycle': 0,
+                    'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    'action': f"OPEN_{side}",
+                    'symbol': symbol,
+                    'entry_price': entry_price,
+                    'quantity': qty,
+                    'cost': entry_price * qty,
+                    'exit_price': 0,
+                    'pnl': 0.0,
+                    'confidence': 'N/A',
+                    'status': 'OPEN (SYNC)',
+                    'cycle': global_state.current_cycle_id or 'N/A'
+                }
+                global_state.trade_history.insert(0, trade_record)
+                added.append(symbol)
+
+        if added:
+            if len(global_state.trade_history) > 50:
+                global_state.trade_history = global_state.trade_history[:50]
+            log.info(f"📜 Synced open positions into trade history: {', '.join(added)}")
+            global_state.add_log(f"[📜 SYSTEM] Synced open positions: {', '.join(added)}")
 
     def _apply_agent_config(self, agents: Dict[str, bool]) -> None:
         """Apply runtime agent config and sync optional agent instances."""
@@ -3154,10 +3294,23 @@ class MultiAgentTradingBot:
                 if cycle_num == 1:
                     global_state.clear_init_logs()
 
+                # 🔒 Position lock: if any active position exists, lock analysis to it.
+                active_symbols = self._get_active_position_symbols()
+                locked_symbols = [s for s in self.symbols if s in active_symbols]
+                if active_symbols and not locked_symbols:
+                    locked_symbols = sorted(set(active_symbols))
+                has_lock = bool(locked_symbols)
+
                 # 🔝 Symbol Selector Agent: run once at startup, then every 10 minutes during wait
-                if self.selector_last_run == 0.0 and self.agent_config.symbol_selector_agent:
+                if not has_lock and self.selector_last_run == 0.0 and self.agent_config.symbol_selector_agent:
                     self._run_symbol_selector(reason="startup")
-                
+
+                symbols_for_cycle = locked_symbols if has_lock else self.symbols
+                if has_lock:
+                    self.current_symbol = symbols_for_cycle[0]
+                    global_state.current_symbol = self.current_symbol
+                    global_state.add_log(f"[🔒 SYSTEM] Active position lock: {', '.join(symbols_for_cycle)}")
+
                 # 🧪 Test Mode: Record start of cycle account state (for Net Value Curve)
                 if self.test_mode:
                     # Re-log current state with new cycle number so chart shows start of cycle
@@ -3170,13 +3323,13 @@ class MultiAgentTradingBot:
                 
                 # 🖥️ Headless Mode: Use terminal display
                 if self._headless_mode:
-                    self._terminal_display.print_cycle_start(cycle_num, self.symbols)
+                    self._terminal_display.print_cycle_start(cycle_num, symbols_for_cycle)
                 else:
                     print(f"\n{'='*80}")
-                    print(f"🔄 Cycle #{cycle_num} | 分析 {len(self.symbols)} 个交易对")
+                    print(f"🔄 Cycle #{cycle_num} | 分析 {len(symbols_for_cycle)} 个交易对")
                     print(f"{'='*80}")
                 global_state.add_log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                global_state.add_log(f"[📊 SYSTEM] Cycle #{cycle_num} | {', '.join(self.symbols)}")
+                global_state.add_log(f"[📊 SYSTEM] Cycle #{cycle_num} | {', '.join(symbols_for_cycle)}")
 
                 # 🎯 重置周期开仓计数器
                 global_state.cycle_positions_opened = 0
@@ -3185,7 +3338,7 @@ class MultiAgentTradingBot:
                 # Step 1: 收集所有交易对的决策
                 all_decisions = []
                 latest_prices = {}  # Store latest prices for PnL calculation
-                for symbol in self.symbols:
+                for symbol in symbols_for_cycle:
                     self.current_symbol = symbol  # 设置当前处理的交易对
                     global_state.current_symbol = symbol
                     
@@ -3251,7 +3404,7 @@ class MultiAgentTradingBot:
                         initial=global_state.initial_balance,
                         cycle=global_state.cycle_counter,
                         positions=positions,
-                        symbols=self.symbols
+                        symbols=symbols_for_cycle
                     )
                 
                 # Dynamic Interval: specific to new requirement

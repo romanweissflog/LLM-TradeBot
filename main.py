@@ -1962,10 +1962,17 @@ class MultiAgentTradingBot:
                 # LOG 3: Critic (Wait Case)
                 global_state.add_log(f"⚖️ DecisionCoreAgent (The Critic): Context(Regime={regime_txt}, Pos={pos_txt}) => Vote: WAIT ({vote_result.reason})")
                 
-                # Check if there's an active position
-                # For now, we assume no position in test mode (can be enhanced with real position check)
-                actual_action = 'wait'  # No position → wait (观望)
-                # If we had a position, it would be 'hold' (持有)
+                # Check if there's an active position to distinguish hold vs wait.
+                has_position = False
+                if current_position_info:
+                    try:
+                        qty = float(current_position_info.get('quantity', 0) or 0)
+                        has_position = abs(qty) > 0
+                    except (TypeError, ValueError):
+                        has_position = True
+                if not has_position and self.test_mode:
+                    has_position = self.current_symbol in global_state.virtual_positions
+                actual_action = 'hold' if has_position else 'wait'  # Position → hold, no position → wait
                 
                 # Update State with WAIT/HOLD decision
                 decision_dict = asdict(vote_result)

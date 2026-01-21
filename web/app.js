@@ -1741,8 +1741,18 @@ function updateAgentFramework(system, decision, agents) {
         const lang = window.currentLang === 'zh' ? 'zh' : 'en';
         const t = (key) => (window.i18n && window.i18n[lang] && window.i18n[lang][key]) || key;
 
+        // Translate reason if needed (backend may return Chinese)
+        const translateReason = (reason) => {
+            if (!reason || lang === 'zh') return reason;
+            // Try to find translation for the reason
+            const key = 'reason.' + reason;
+            const translated = t(key);
+            return translated !== key ? translated : reason;
+        };
+
         if (decision.guardian_passed === false) {
-            const reason = decision.guardian_reason || t('summary.blocked.reason');
+            const rawReason = decision.guardian_reason || t('summary.blocked.reason');
+            const reason = translateReason(rawReason);
             setSummary('sum-risk', `${t('summary.risk.blocked')} ${reason}.`);
         } else {
             const fmt = t('summary.risk.format')
@@ -1797,9 +1807,18 @@ function updateAgentFramework(system, decision, agents) {
         const lang = window.currentLang === 'zh' ? 'zh' : 'en';
         const t = (key) => (window.i18n && window.i18n[lang] && window.i18n[lang][key]) || key;
 
+        // Translate reason if needed (backend may return Chinese)
+        const translateReason = (reason) => {
+            if (!reason || lang === 'zh') return reason;
+            const key = 'reason.' + reason;
+            const translated = t(key);
+            return translated !== key ? translated : reason;
+        };
+
         const symbolText = decision.symbol || '--';
         if (isBlocked) {
-            const reason = decision.guardian_reason || t('summary.blocked.reason');
+            const rawReason = decision.guardian_reason || t('summary.blocked.reason');
+            const reason = translateReason(rawReason);
             setSummary('sum-output', `${t('summary.output.blocked')} ${symbolText}. ${reason}.`);
         } else {
             const fmt = t('summary.output.format')

@@ -320,7 +320,24 @@ const i18n = {
         'summary.output.blocked': 'EXEC BLOCKED',
         'summary.output.format': 'EXEC {action} {symbol} {size}.',
         'summary.decision.pending': 'Decision pending.',
-        'summary.blocked.reason': 'blocked by risk audit'
+        'summary.blocked.reason': 'blocked by risk audit',
+
+        // Reason translations (Chinese -> English)
+        'reason.无仓位需要平仓': 'No position to close',
+        'reason.当前无持仓': 'No current position',
+        'reason.风控拦截': 'Risk audit blocked',
+        'reason.趋势不明确': 'Trend unclear',
+        'reason.波动率过高': 'Volatility too high',
+        'reason.信号强度不足': 'Signal strength insufficient',
+        'reason.仓位已满': 'Position limit reached',
+        'reason.冷却期未过': 'Cooldown period not over',
+        'reason.市场状态不适合': 'Market condition unfavorable',
+        'reason.风险过高': 'Risk too high',
+        'reason.资金不足': 'Insufficient funds',
+        'reason.多空分歧': 'Bull-bear disagreement',
+        'reason.信心不足': 'Confidence insufficient',
+        'reason.等待更好入场点': 'Waiting for better entry',
+        'reason.HOLD决策': 'HOLD decision'
     },
 
     zh: {

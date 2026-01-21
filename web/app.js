@@ -292,6 +292,12 @@ function updateDashboard() {
             const selectorMode = (selectorInfo.mode || '').toUpperCase();
             const selectorSymbol = selectorInfo.symbol;
             const autoSymbol = selectorMode.startsWith('AUTO') ? selectorSymbol : null;
+
+            // Log symbol selector info for debugging
+            if (autoSymbol) {
+                console.log(`📊 Symbol Selector: mode=${selectorMode}, symbol=${autoSymbol}`);
+            }
+
             const symbolSelectorEl = document.getElementById('symbol-selector');
             if (autoSymbol && symbolSelectorEl) {
                 if (Array.isArray(data.system?.symbols) && data.system.symbols.includes(autoSymbol)) {
@@ -310,10 +316,13 @@ function updateDashboard() {
                     symbolDisplayText.textContent = headerSymbol;
                 }
             }
+
+            // Priority: AUTO symbol > header symbol > preferred symbol
             const chartSymbol = autoSymbol || headerSymbol || preferredSymbol;
             if (chartSymbol
                 && typeof loadTradingViewChart === 'function'
                 && chartSymbol !== window.lastChartSymbol) {
+                console.log(`📈 Chart Update: ${window.lastChartSymbol || 'none'} → ${chartSymbol}`);
                 window.lastChartSymbol = chartSymbol;
                 loadTradingViewChart(chartSymbol);
             }

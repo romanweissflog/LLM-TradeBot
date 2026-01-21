@@ -1197,6 +1197,10 @@ function updateAgentFramework(system, decision, agents) {
         const box = document.getElementById(agentId);
         if (!box) return;
 
+        // 🆕 Trigger meteor arrow animation
+        box.classList.add('meteor-sending');
+        setTimeout(() => box.classList.remove('meteor-sending'), 700);
+
         // Trigger sending animation on current agent
         box.classList.add('data-sending');
         setTimeout(() => box.classList.remove('data-sending'), 500);

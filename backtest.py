@@ -66,8 +66,8 @@ Examples:
     parser.add_argument(
         "--symbol",
         type=str,
-        default="AUTO3",
-        help="交易对 (AUTO3=自动选币, AUTO1=动量选币, 或指定如 BTCUSDT)"
+        default="AUTO1",  # 默认使用 AUTO1，与实盘一致
+        help="交易对 (AUTO1=动量选币[默认], AUTO3=回测选币, 或指定如 BTCUSDT)"
     )
     
     parser.add_argument(

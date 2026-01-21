@@ -1158,13 +1158,87 @@ function updateAgentFramework(system, decision, agents) {
                 box.classList.remove('flow-finish');
                 void box.offsetWidth;
                 box.classList.add('flow-finish');
+                // 🆕 Trigger data-sending animation on completion
+                triggerDataCascade(agentId);
             }
+            if (statusClass === 'running') {
+                // 🆕 Trigger data-receiving animation when agent starts
+                box.classList.add('data-receiving');
+                setTimeout(() => box.classList.remove('data-receiving'), 400);
+            }
+            // 🆕 Update layer states after status change
+            setTimeout(() => updateLayerStates(), 50);
         }
         if (badge) {
             badge.textContent = displayStatus;
             badge.className = 'agent-badge';
             badge.classList.add(statusClass);
         }
+    };
+
+    // 🆕 Data cascade effect - animate data flowing to next layer
+    const agentFlowOrder = {
+        'flow-datasync': ['flow-quant', 'flow-regime', 'flow-trigger-detector', 'flow-position-analyzer', 'flow-predict'],
+        'flow-symbol-selector': ['flow-datasync'],
+        'flow-quant': ['flow-trend-agent', 'flow-trigger-agent', 'flow-ai-filter'],
+        'flow-regime': ['flow-decision'],
+        'flow-predict': ['flow-decision'],
+        'flow-trigger-detector': ['flow-decision'],
+        'flow-position-analyzer': ['flow-decision'],
+        'flow-trend-agent': ['flow-decision'],
+        'flow-trigger-agent': ['flow-decision'],
+        'flow-ai-filter': ['flow-decision'],
+        'flow-decision': ['flow-risk'],
+        'flow-risk': ['flow-output'],
+        'flow-output': ['flow-reflection']
+    };
+
+    const triggerDataCascade = (agentId) => {
+        const box = document.getElementById(agentId);
+        if (!box) return;
+
+        // Trigger sending animation on current agent
+        box.classList.add('data-sending');
+        setTimeout(() => box.classList.remove('data-sending'), 500);
+
+        // Trigger receiving animation on next agents (with delay)
+        const nextAgents = agentFlowOrder[agentId] || [];
+        nextAgents.forEach((nextId, index) => {
+            const nextBox = document.getElementById(nextId);
+            if (nextBox && !nextBox.classList.contains('off')) {
+                setTimeout(() => {
+                    nextBox.classList.add('data-receiving');
+                    setTimeout(() => nextBox.classList.remove('data-receiving'), 400);
+                }, 150 + (index * 100));
+            }
+        });
+
+        // 🆕 Update layer active states
+        updateLayerStates();
+    };
+
+    // 🆕 Layer mapping for visual feedback
+    const layerAgentMap = {
+        'data': ['flow-datasync', 'flow-symbol-selector'],
+        'analysis': ['flow-quant', 'flow-regime', 'flow-trigger-detector', 'flow-position-analyzer', 'flow-predict'],
+        'strategy': ['flow-trend-agent', 'flow-trigger-agent', 'flow-ai-filter'],
+        'decision': ['flow-decision'],
+        'execution': ['flow-risk', 'flow-output', 'flow-reflection']
+    };
+
+    // 🆕 Update layer active states based on running agents
+    const updateLayerStates = () => {
+        Object.entries(layerAgentMap).forEach(([layerName, agentIds]) => {
+            const layer = document.querySelector(`.flow-layer[data-layer="${layerName}"]`);
+            if (!layer) return;
+
+            const hasRunningAgent = agentIds.some(id => {
+                const box = document.getElementById(id);
+                return box && box.classList.contains('running');
+            });
+
+            layer.classList.toggle('layer-active', hasRunningAgent);
+        });
     };
 
     // Helper to set output value

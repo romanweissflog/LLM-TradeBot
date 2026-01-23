@@ -55,7 +55,8 @@ class DataReplayAgent:
     4. 模拟实时数据流用于回测
     """
     
-    CACHE_DIR = "data/backtest_cache"
+    CACHE_DIR = "data/backtest/cache"  # Backtest-specific cache
+    KLINE_DIR = "data/kline"  # Shared K-line cache (prioritized)
     
     def __init__(
         self,
@@ -108,7 +109,7 @@ class DataReplayAgent:
         """
         加载历史数据 (使用统一的 KlineCache)
         
-        优先从 data/kline_cache/{symbol}/*.parquet 读取
+        优先从 data/kline/{symbol}/*.parquet 读取 (共享目录)
         只获取增量数据从 API
         
         Returns:

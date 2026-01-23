@@ -12,7 +12,7 @@ from src.utils.json_utils import safe_json_dump, safe_json_dumps
 class TradeLogger:
     """交易日志记录器"""
     
-    def __init__(self, log_dir: str = "data/execution/tracking"):
+    def __init__(self, log_dir: str = "data/live/execution/tracking"):
         """
         初始化交易日志记录器
         

@@ -31,53 +31,75 @@ class CustomJSONEncoder(json.JSONEncoder):
 class DataSaver:
     """数据保存工具类 - 按Agent和业务领域自动组织文件
     
-    新目录结构 (Multi-Agent Framework):
+    新目录结构 (Multi-Agent Framework with Live/Backtest Separation):
     data/
-      agents/              (所有LLM Agent的日志)
-        trend_agent/
-        setup_agent/
-        trigger_agent/
-        bull_bear/
-        strategy_engine/
-        reflection/
-      market_data/         (原始市场数据)
-      analytics/           (量化分析)
-      execution/           (交易执行)
-      risk/                (风控审计)
+      kline/               (共享 K 线缓存，实盘和回测都优先读取)
+      live/                (实盘数据)
+        agents/            (所有LLM Agent的日志)
+          trend_agent/
+          setup_agent/
+          trigger_agent/
+          bull_bear/
+          strategy_engine/
+          reflection/
+        market_data/       (原始市场数据)
+        analytics/         (量化分析)
+        execution/         (交易执行)
+        risk/              (风控审计)
+      backtest/            (回测数据)
+        agents/
+        analytics/
+        results/
+        trades/
     """
     
-    def __init__(self, base_dir: str = 'data'):
+    def __init__(self, base_dir: str = 'data', mode: str = 'live'):
+        """
+        初始化数据保存工具
+        
+        Args:
+            base_dir: 数据根目录，默认为 'data'
+            mode: 运行模式 - 'live' (实盘) 或 'backtest' (回测)
+        """
         self.base_dir = base_dir
+        self.mode = mode
+        
+        # 模式目录: data/live 或 data/backtest
+        self.mode_dir = os.path.join(base_dir, mode)
+        
+        # 共享 K 线目录 (实盘和回测共用)
+        self.kline_dir = os.path.join(base_dir, 'kline')
         
         # 定义业务目录映射 (Agent-Based Structure)
         self.dirs = {
             # Agent层 - 所有LLM Agent日志
-            'trend_agent': os.path.join(base_dir, 'agents', 'trend_agent'),
-            'setup_agent': os.path.join(base_dir, 'agents', 'setup_agent'),
-            'trigger_agent': os.path.join(base_dir, 'agents', 'trigger_agent'),
-            'bull_bear': os.path.join(base_dir, 'agents', 'bull_bear'),
-            'strategy_engine': os.path.join(base_dir, 'agents', 'strategy_engine'),
-            'reflection': os.path.join(base_dir, 'agents', 'reflection'),
+            'trend_agent': os.path.join(self.mode_dir, 'agents', 'trend_agent'),
+            'setup_agent': os.path.join(self.mode_dir, 'agents', 'setup_agent'),
+            'trigger_agent': os.path.join(self.mode_dir, 'agents', 'trigger_agent'),
+            'bull_bear': os.path.join(self.mode_dir, 'agents', 'bull_bear'),
+            'strategy_engine': os.path.join(self.mode_dir, 'agents', 'strategy_engine'),
+            'reflection': os.path.join(self.mode_dir, 'agents', 'reflection'),
             
             # 数据层
-            'market_data': os.path.join(base_dir, 'market_data'),
+            'market_data': os.path.join(self.mode_dir, 'market_data'),
+            'kline': self.kline_dir,  # 共享 K 线目录
             
             # 分析层
-            'indicators': os.path.join(base_dir, 'analytics', 'indicators'),
-            'predictions': os.path.join(base_dir, 'analytics', 'predictions'),
-            'regime': os.path.join(base_dir, 'analytics', 'regime'),
-            'analytics': os.path.join(base_dir, 'analytics'),
+            'indicators': os.path.join(self.mode_dir, 'analytics', 'indicators'),
+            'predictions': os.path.join(self.mode_dir, 'analytics', 'predictions'),
+            'regime': os.path.join(self.mode_dir, 'analytics', 'regime'),
+            'analytics': os.path.join(self.mode_dir, 'analytics'),
             
             # 执行层
-            'orders': os.path.join(base_dir, 'execution', 'orders'),
-            'trades': os.path.join(base_dir, 'execution', 'trades'),
+            'orders': os.path.join(self.mode_dir, 'execution', 'orders'),
+            'trades': os.path.join(self.mode_dir, 'execution', 'trades'),
             
             # 风控层
-            'risk_audits': os.path.join(base_dir, 'risk', 'audits'),
+            'risk_audits': os.path.join(self.mode_dir, 'risk', 'audits'),
             
             # 兼容旧路径 (向后兼容)
-            'llm_logs': os.path.join(base_dir, 'agents', 'strategy_engine'),  # 兼容旧代码
-            'decisions': os.path.join(base_dir, 'agents', 'strategy_engine'),
+            'llm_logs': os.path.join(self.mode_dir, 'agents', 'strategy_engine'),  # 兼容旧代码
+            'decisions': os.path.join(self.mode_dir, 'agents', 'strategy_engine'),
         }
         
         # 兼容旧路径映射

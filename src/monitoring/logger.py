@@ -13,14 +13,15 @@ from src.utils.logger import log
 class TradingLogger:
     """交易日志记录器 (支持 Postgres & SQLite)"""
     
-    def __init__(self, db_path: str = "logs/trading.db"):
+    def __init__(self, db_path: str = "data/analytics/trading.db"):
         # 1. 尝试从环境变量获取数据库地址 (Railway 会自动注入 DATABASE_URL)
         self.db_url = os.getenv("DATABASE_URL")
         self.is_postgres = False
         
         # 2. 如果没有 DATABASE_URL，则回退到本地 SQLite
         if not self.db_url:
-            self.db_path = Path(db_path)
+            local_db_path = os.getenv("TRADING_DB_PATH", db_path)
+            self.db_path = Path(local_db_path)
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             self.db_url = f"sqlite:///{self.db_path}"
             log.info(f"⚠️ DATABASE_URL not found, using local SQLite: {self.db_path}")

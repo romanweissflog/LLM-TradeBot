@@ -26,8 +26,8 @@ class BacktestStorage:
         """
         if db_path is None:
             base_dir = Path(__file__).parent.parent.parent
-            data_dir = base_dir / 'data'
-            data_dir.mkdir(exist_ok=True)
+            data_dir = base_dir / 'data' / 'backtest'  # New: use data/backtest/ directory
+            data_dir.mkdir(parents=True, exist_ok=True)
             db_path = str(data_dir / 'backtest_analytics.db')
         
         self.db_path = db_path

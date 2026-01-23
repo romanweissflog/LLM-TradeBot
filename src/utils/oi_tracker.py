@@ -21,7 +21,7 @@ class OITracker:
     3. 计算 24h / 1h 变化率
     """
     
-    def __init__(self, data_dir: str = "data/oi_history"):
+    def __init__(self, data_dir: str = "data/live/oi_history"):
         self.data_dir = data_dir
         self.history: Dict[str, List[Dict]] = defaultdict(list)  # {symbol: [{ts, oi}, ...]}
         self.max_history_hours = 48  # 保留最近 48 小时数据

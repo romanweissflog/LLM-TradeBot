@@ -51,7 +51,7 @@ class KlineCache:
         '1d': 24 * 60 * 60 * 1000,
     }
     
-    def __init__(self, cache_dir: str = "data/kline_cache"):
+    def __init__(self, cache_dir: str = "data/kline"):
         """
         Initialize K-line cache
         

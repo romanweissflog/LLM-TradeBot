@@ -615,13 +615,25 @@ function updateDashboard() {
                 lastCycleCounter = cycleCounter;
             }
 
-            if (!realtimeBalanceHistory.length && curveBaselineBalance !== null && curveBaselineTime) {
+            // Use backend's equity_history as the base to ensure x-axis starts from project startup time
+            const backendEquityHistory = data.chart_data && data.chart_data.equity ? data.chart_data.equity : [];
+
+            // Initialize realtimeBalanceHistory from backend history on first load
+            if (!realtimeBalanceHistory.length && backendEquityHistory.length) {
+                // Copy all backend history points to ensure we start from project startup time
+                realtimeBalanceHistory = backendEquityHistory.map(h => ({
+                    time: h.time,
+                    value: h.value
+                }));
+            } else if (!realtimeBalanceHistory.length && curveBaselineBalance !== null && curveBaselineTime) {
+                // Fallback: use baseline if no backend history
                 realtimeBalanceHistory.push({
                     time: curveBaselineTime,
                     value: curveBaselineBalance
                 });
             }
 
+            // Add real-time balance point if available
             if (balanceSnapshot) {
                 const point = {
                     time: formatTimestamp(),
@@ -635,9 +647,10 @@ function updateDashboard() {
                 }
             }
 
+            // Ensure we always use backend history as base if local history is somehow empty
             const curveData = realtimeBalanceHistory.length
                 ? realtimeBalanceHistory
-                : (data.chart_data && data.chart_data.equity ? data.chart_data.equity : null);
+                : (backendEquityHistory.length ? backendEquityHistory : null);
 
             if (curveData) {
                 const baseline = curveBaselineBalance ?? balanceSnapshot?.initial ?? initialAmount;

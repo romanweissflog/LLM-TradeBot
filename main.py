@@ -2107,16 +2107,8 @@ class MultiAgentTradingBot:
 
             # 如果是观望，也需要更新状态
             if vote_result.action in ('hold', 'wait'):
-                print(f"\n✅ 决策: 观望 ({vote_result.action})")
-                
-                # GlobalState Logging of Logic
-                regime_txt = vote_result.regime.get('regime', 'Unknown') if vote_result.regime else 'Unknown'
-                pos_txt = f"{min(max(vote_result.position.get('position_pct', 0), 0), 100):.0f}%" if vote_result.position else 'N/A'
-                
-                # LOG 3: Critic (Wait Case)
-                global_state.add_log(f"⚖️ DecisionCoreAgent (The Critic): Context(Regime={regime_txt}, Pos={pos_txt}) => Vote: WAIT ({vote_result.reason})")
-                
                 # Check if there's an active position to distinguish hold vs wait.
+                # ✅ 先检查持仓，再显示正确的 action
                 has_position = False
                 if current_position_info:
                     try:
@@ -2127,6 +2119,17 @@ class MultiAgentTradingBot:
                 if not has_position and self.test_mode:
                     has_position = self.current_symbol in global_state.virtual_positions
                 actual_action = 'hold' if has_position else 'wait'  # Position → hold, no position → wait
+                
+                # ✅ 使用修正后的 action 显示
+                action_display = '持仓观望' if actual_action == 'hold' else '观望'
+                print(f"\n✅ 决策: {action_display} ({actual_action})")
+                
+                # GlobalState Logging of Logic
+                regime_txt = vote_result.regime.get('regime', 'Unknown') if vote_result.regime else 'Unknown'
+                pos_txt = f"{min(max(vote_result.position.get('position_pct', 0), 0), 100):.0f}%" if vote_result.position else 'N/A'
+                
+                # LOG 3: Critic (Wait/Hold Case) - 使用修正后的 action
+                global_state.add_log(f"⚖️ DecisionCoreAgent (The Critic): Context(Regime={regime_txt}, Pos={pos_txt}) => Vote: {actual_action.upper()} ({vote_result.reason})")
                 
                 # Update State with WAIT/HOLD decision
                 decision_dict = asdict(vote_result)

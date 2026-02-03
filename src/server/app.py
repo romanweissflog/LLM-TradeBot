@@ -662,7 +662,7 @@ def _merge_agent_settings(defaults: Dict[str, Any], saved: Dict[str, Any]) -> Di
 
 def _load_agent_settings() -> Dict[str, Any]:
     cached = getattr(global_state, "agent_settings", None)
-    if isinstance(cached, dict):
+    if isinstance(cached, dict) and cached.get("agents"):
         return cached
     defaults = _build_default_agent_settings()
     if AGENT_SETTINGS_PATH.exists():

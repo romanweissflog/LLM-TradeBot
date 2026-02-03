@@ -4599,71 +4599,74 @@ function renderTradeHistory(trades) {
 // Agent Configuration Modal
 // ========================================
 (function () {
-    const btnViewPrompts = document.getElementById('btn-view-prompts');
-    const promptsModal = document.getElementById('prompts-modal');
-    const closePrompts = document.getElementById('close-prompts');
-    const tabsContainer = document.getElementById('agent-config-tabs');
-    const panelContainer = document.getElementById('agent-config-panel');
-    const saveBtn = document.getElementById('agent-config-save');
-    const llmInfoBadge = document.getElementById('llm-info-badge');
-    const llmProviderText = document.getElementById('llm-provider-text');
-    const llmModelText = document.getElementById('llm-model-text');
+    function initAgentConfigModal() {
+        const btnViewPrompts = document.getElementById('btn-view-prompts');
+        const promptsModal = document.getElementById('prompts-modal');
+        const closePrompts = document.getElementById('close-prompts');
+        const tabsContainer = document.getElementById('agent-config-tabs');
+        const panelContainer = document.getElementById('agent-config-panel');
+        const saveBtn = document.getElementById('agent-config-save');
+        const llmInfoBadge = document.getElementById('llm-info-badge');
+        const llmProviderText = document.getElementById('llm-provider-text');
+        const llmModelText = document.getElementById('llm-model-text');
 
-    const AGENT_DEFS = [
-        { id: 'symbol_selector', label: '🎯 Symbol Selector', hasPrompt: true },
-        { id: 'trend_agent', label: '📊 Trend Agent (1h)', hasPrompt: true },
-        { id: 'setup_agent', label: '📉 Setup Agent (15m)', hasPrompt: true },
-        { id: 'trigger_agent', label: '⚡ Trigger Agent (5m)', hasPrompt: true },
-        { id: 'multi_period', label: '🧭 Multi-Period Parser', hasPrompt: false },
-        { id: 'reflection_agent', label: '🧠 Reflection Agent', hasPrompt: true },
-        { id: 'risk_audit', label: '🛡️ Risk Audit', hasPrompt: false },
-        { id: 'decision_core', label: '⚖️ Decision Core', hasPrompt: true }
-    ];
+        const AGENT_DEFS = [
+            { id: 'symbol_selector', label: '🎯 Symbol Selector', hasPrompt: true },
+            { id: 'trend_agent', label: '📊 Trend Agent (1h)', hasPrompt: true },
+            { id: 'setup_agent', label: '📉 Setup Agent (15m)', hasPrompt: true },
+            { id: 'trigger_agent', label: '⚡ Trigger Agent (5m)', hasPrompt: true },
+            { id: 'multi_period', label: '🧭 Multi-Period Parser', hasPrompt: false },
+            { id: 'reflection_agent', label: '🧠 Reflection Agent', hasPrompt: true },
+            { id: 'risk_audit', label: '🛡️ Risk Audit', hasPrompt: false },
+            { id: 'decision_core', label: '⚖️ Decision Core', hasPrompt: true }
+        ];
 
-    let agentSettings = { agents: {} };
-    let draftInputs = {};
-    let activeAgentId = AGENT_DEFS[0]?.id || null;
+        let agentSettings = { agents: {} };
+        let draftInputs = {};
+        let activeAgentId = AGENT_DEFS[0]?.id || null;
 
-    if (btnViewPrompts) {
-        btnViewPrompts.addEventListener('click', async function () {
-            promptsModal.style.display = 'flex';
-            await loadAgentSettings();
-        });
-    }
-
-    if (closePrompts) {
-        closePrompts.addEventListener('click', function () {
-            promptsModal.style.display = 'none';
-        });
-    }
-
-    // Close modal when clicking outside
-    window.addEventListener('click', function (event) {
-        if (event.target === promptsModal) {
-            promptsModal.style.display = 'none';
+        if (btnViewPrompts) {
+            btnViewPrompts.addEventListener('click', async function () {
+                if (!promptsModal) return;
+                promptsModal.style.display = 'flex';
+                await loadAgentSettings();
+            });
         }
-    });
 
-    if (saveBtn) {
-        saveBtn.addEventListener('click', async function () {
-            try {
-                stashDraft(activeAgentId);
-                const payload = buildSettingsPayload();
-                saveBtn.disabled = true;
-                await apiFetch('/api/agents/settings', {
-                    method: 'POST',
-                    body: JSON.stringify(payload)
-                });
-                agentSettings = payload;
-                alert('Agent settings saved.');
-            } catch (err) {
-                console.error('Failed to save agent settings:', err);
-                alert(`Failed to save agent settings: ${err.message}`);
-            } finally {
-                saveBtn.disabled = false;
+        if (closePrompts) {
+            closePrompts.addEventListener('click', function () {
+                if (!promptsModal) return;
+                promptsModal.style.display = 'none';
+            });
+        }
+
+        // Close modal when clicking outside
+        window.addEventListener('click', function (event) {
+            if (event.target === promptsModal) {
+                promptsModal.style.display = 'none';
             }
         });
-    }
+
+        if (saveBtn) {
+            saveBtn.addEventListener('click', async function () {
+                try {
+                    stashDraft(activeAgentId);
+                    const payload = buildSettingsPayload();
+                    saveBtn.disabled = true;
+                    await apiFetch('/api/agents/settings', {
+                        method: 'POST',
+                        body: JSON.stringify(payload)
+                    });
+                    agentSettings = payload;
+                    alert('Agent settings saved.');
+                } catch (err) {
+                    console.error('Failed to save agent settings:', err);
+                    alert(`Failed to save agent settings: ${err.message}`);
+                } finally {
+                    saveBtn.disabled = false;
+                }
+            });
+        }
 
     async function loadAgentSettings() {
         if (!panelContainer || !tabsContainer) return;
@@ -4805,8 +4808,15 @@ function renderTradeHistory(trades) {
         }
     }
 
-    refreshLlmBadge();
-    setInterval(refreshLlmBadge, 30000);
+        refreshLlmBadge();
+        setInterval(refreshLlmBadge, 30000);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initAgentConfigModal);
+    } else {
+        initAgentConfigModal();
+    }
 })();
 
 // ========================================

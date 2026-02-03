@@ -4182,7 +4182,6 @@ def main():
     parser.add_argument('--interval', type=float, default=3.0, help='持续运行间隔（分钟）')
     # CLI Headless Mode
     parser.add_argument('--headless', action='store_true', help='无头模式：不启动 Web Dashboard，在终端显示实时数据')
-    parser.add_argument('--auto-start', action='store_true', help='自动开始交易（不等待用户点击 Start）')
     
     args = parser.parse_args()
     
@@ -4240,8 +4239,8 @@ def main():
     )
 
     # Set initial execution mode before dashboard starts
-    auto_start = args.headless or args.auto_start
-    global_state.execution_mode = "Running" if auto_start else "Stopped"
+    # Require explicit user action (Start button) to begin trading
+    global_state.execution_mode = "Stopped"
     
     # 启动 Dashboard Server (跳过 headless 模式) - 优先启动，让用户能立即访问
     if not args.headless:
@@ -4303,15 +4302,10 @@ def main():
         # or exit immediately. Usually 'once' implies run and exit.
         
     else:
-        # Headless 模式或 --auto-start: 自动开始交易
-        if args.headless or args.auto_start:
-            global_state.execution_mode = "Running"
-            log.info("🚀 Auto-start enabled: Trading begins immediately...")
-        else:
-            # Default to Stopped - Wait for user to click Start button
-            if global_state.execution_mode != "Running":
-                global_state.execution_mode = "Stopped"
-                log.info("🚀 System ready (Stopped). Waiting for user to click Start button...")
+        # Default to Stopped - Wait for user to click Start button
+        if global_state.execution_mode != "Running":
+            global_state.execution_mode = "Stopped"
+            log.info("🚀 System ready (Stopped). Waiting for user to click Start button...")
         
         global_state.is_running = True  # Keep event loop running
         bot.run_continuous(interval_minutes=args.interval, headless=args.headless)

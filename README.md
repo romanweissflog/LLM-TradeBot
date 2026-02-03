@@ -276,13 +276,11 @@ Edit `config.yaml` to set parameters:
 
 You can also configure all settings from the Dashboard:
 
-![Settings Tabs](./docs/settings_tabs_composite.png)
 
 *Settings Modal with 4 tabs: API Keys (LLM Provider), Accounts (Multi-Account), Trading, Strategy (Prompt)*
 
 ### 4. Start the Bot
 
-![Dashboard Preview](./docs/dashboard_preview_1.png)
 Built-in modern real-time monitoring dashboard.
 
 #### 🧪 Test Mode (Recommended for beginners)
@@ -302,11 +300,8 @@ Run the bot without Web Dashboard, perfect for headless servers or terminal-only
 # Basic CLI mode (manual start required)
 python main.py --test --headless
 
-# Auto-start mode (trading begins immediately)
-python main.py --test --headless --auto-start
-
 # Custom interval (1 minute cycles)
-python main.py --test --headless --auto-start --interval 1
+python main.py --test --headless --interval 1
 ```
 
 **Features**:

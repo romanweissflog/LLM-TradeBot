@@ -177,7 +177,7 @@
                                     🤖 <span id="llm-provider-text">--</span> (<span id="llm-model-text">--</span>)
                                 </div>
                                 <button id="btn-view-prompts" class="llm-toggle-btn" type="button"
-                                    style="margin-right: 5px;">View Prompts</button>
+                                    style="margin-right: 5px;">Agent Config</button>
                                 <button id="btn-llm-toggle" class="llm-toggle-btn" type="button">LLM: OFF</button>
                             </div>
                         </div>
@@ -1178,58 +1178,26 @@
         })();
     </script>
 
-    <!-- Agent Prompts Modal -->
+    <!-- Agent Config Modal -->
     <div id="prompts-modal" class="modal-overlay" style="display: none;">
-        <div class="modal-content settings-modal" style="width: 800px; max-width: 95vw;">
+        <div class="modal-content settings-modal agent-config-modal">
             <div class="modal-header">
-                <h3>🤖 Agent System Prompts</h3>
+                <h3>🧩 Agent Configuration</h3>
                 <button id="close-prompts" class="btn-close">×</button>
             </div>
-            <div class="settings-body" style="background: #0d1117;">
-                <div id="prompts-container" class="prompts-display">
-                    <p style="color: #718096; text-align: center; padding: 20px;">Loading agent prompts...</p>
+            <div class="agent-config-body">
+                <div id="agent-config-tabs" class="agent-config-tabs">
+                    <!-- tabs injected by JS -->
                 </div>
+                <div id="agent-config-panel" class="agent-config-panel">
+                    <p style="color: #718096; text-align: center; padding: 20px;">Loading agent settings...</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="agent-config-save" class="btn-primary">Save Agent Config</button>
             </div>
         </div>
     </div>
-
-    <style>
-        .prompts-display {
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-        }
-
-        .prompt-section {
-            background: rgba(255, 255, 255, 0.03);
-            border-radius: 8px;
-            padding: 15px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
-
-        .prompt-section h4 {
-            margin: 0 0 10px 0;
-            color: #00ff9d;
-            font-family: 'IBM Plex Mono', monospace;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .prompt-content {
-            background: #161b22;
-            padding: 12px;
-            border-radius: 4px;
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 12px;
-            white-space: pre-wrap;
-            color: #c9d1d9;
-            max-height: 300px;
-            overflow-y: auto;
-            border: 1px solid rgba(0, 0, 0, 0.3);
-            line-height: 1.5;
-        }
-    </style>
 
 </body>
 

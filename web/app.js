@@ -4628,11 +4628,17 @@ function renderTradeHistory(trades) {
                         body: JSON.stringify(settings)
                     });
                     if (enabled && Object.keys(enabled).length > 0) {
-                        await apiFetch('/api/agents/config', {
-                            method: 'POST',
-                            body: JSON.stringify({ agents: enabled })
-                        });
-                        agentEnabled = { ...(agentEnabled || {}), ...enabled };
+                        const allowedKeys = new Set(Object.keys(agentEnabled || {}));
+                        const filteredEnabled = Object.fromEntries(
+                            Object.entries(enabled).filter(([key]) => allowedKeys.has(key))
+                        );
+                        if (Object.keys(filteredEnabled).length > 0) {
+                            await apiFetch('/api/agents/config', {
+                                method: 'POST',
+                                body: JSON.stringify({ agents: filteredEnabled })
+                            });
+                            agentEnabled = { ...(agentEnabled || {}), ...filteredEnabled };
+                        }
                     }
                     agentSettings = settings;
                     alert('Agent settings saved.');

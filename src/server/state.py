@@ -202,6 +202,12 @@ class SharedState:
         
         # Also log to system logs
         self.add_log(f"[{agent.upper()}] {content}")
+
+    def clear_agent_messages(self):
+        """Clear chatroom messages for a new cycle"""
+        self.agent_messages = []
+        self.last_agent_message = {}
+        self.last_agent_message_cycle = {}
     
     def init_balance(self, balance: float, initial_balance: Optional[float] = None):
         """Initialize the starting balance for tracking."""

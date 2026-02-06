@@ -4028,6 +4028,9 @@ class MultiAgentTradingBot:
                 cycle_trade_action = None
                 cycle_trade_status = None
 
+                # 🧹 Clear chatroom messages each cycle (show current cycle only)
+                global_state.clear_agent_messages()
+
                 # 🧪 Test Mode: reset per-cycle baseline for PnL display
                 if self.test_mode:
                     baseline = global_state.account_overview.get('total_equity', 0)

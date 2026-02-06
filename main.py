@@ -1895,19 +1895,24 @@ class MultiAgentTradingBot:
             global_state.four_layer_result = four_layer_result
             
             # 🆕 MULTI-AGENT SEMANTIC ANALYSIS (LLM/Local)
-            use_trend_llm = self.agent_config.trend_agent_llm or self.agent_config.setup_agent_llm
-            use_trend_local = self.agent_config.trend_agent_local or self.agent_config.setup_agent_local
+            use_trend_llm = self.agent_config.trend_agent_llm
+            use_trend_local = self.agent_config.trend_agent_local
+            use_setup_llm = self.agent_config.setup_agent_llm
+            use_setup_local = self.agent_config.setup_agent_local
             use_trigger_llm = self.agent_config.trigger_agent_llm
             use_trigger_local = self.agent_config.trigger_agent_local
             use_trend = use_trend_llm or use_trend_local
+            use_setup = use_setup_llm or use_setup_local
             use_trigger = use_trigger_llm or use_trigger_local
 
             if use_trend and use_trend_llm and use_trend_local:
                 log.info("⚠️ Both TrendAgentLLM and TrendAgent enabled; using LLM version only")
+            if use_setup and use_setup_llm and use_setup_local:
+                log.info("⚠️ Both SetupAgentLLM and SetupAgent enabled; using LLM version only")
             if use_trigger and use_trigger_llm and use_trigger_local:
                 log.info("⚠️ Both TriggerAgentLLM and TriggerAgent enabled; using LLM version only")
 
-            if use_trend or use_trigger:
+            if use_trend or use_setup or use_trigger:
                 if not (hasattr(self, '_headless_mode') and self._headless_mode):
                     print("[Step 2.5/5] 🤖 Multi-Agent Semantic Analysis...")
                 try:
@@ -1947,23 +1952,27 @@ class MultiAgentTradingBot:
                     if use_trend:
                         if use_trend_llm:
                             from src.agents.trend_agent import TrendAgentLLM
-                            from src.agents.setup_agent import SetupAgentLLM
                             if not hasattr(self, '_trend_agent_llm'):
                                 self._trend_agent_llm = TrendAgentLLM()
-                            if not hasattr(self, '_setup_agent_llm'):
-                                self._setup_agent_llm = SetupAgentLLM()
                             trend_agent = self._trend_agent_llm
-                            setup_agent = self._setup_agent_llm
                         else:
                             from src.agents.trend_agent import TrendAgent
-                            from src.agents.setup_agent import SetupAgent
                             if not hasattr(self, '_trend_agent_local'):
                                 self._trend_agent_local = TrendAgent()
+                            trend_agent = self._trend_agent_local
+                        tasks['trend'] = loop.run_in_executor(None, trend_agent.analyze, trend_data)
+
+                    if use_setup:
+                        if use_setup_llm:
+                            from src.agents.setup_agent import SetupAgentLLM
+                            if not hasattr(self, '_setup_agent_llm'):
+                                self._setup_agent_llm = SetupAgentLLM()
+                            setup_agent = self._setup_agent_llm
+                        else:
+                            from src.agents.setup_agent import SetupAgent
                             if not hasattr(self, '_setup_agent_local'):
                                 self._setup_agent_local = SetupAgent()
-                            trend_agent = self._trend_agent_local
                             setup_agent = self._setup_agent_local
-                        tasks['trend'] = loop.run_in_executor(None, trend_agent.analyze, trend_data)
                         tasks['setup'] = loop.run_in_executor(None, setup_agent.analyze, setup_data)
                     
                     if use_trigger:

@@ -4768,10 +4768,177 @@ function renderTradeHistory(trades) {
         return { agents: normalized };
     }
 
+    function deepClone(value) {
+        return JSON.parse(JSON.stringify(value ?? {}));
+    }
+
     function ensureAgentConfig(agentId) {
         if (!agentSettings.agents[agentId]) {
             agentSettings.agents[agentId] = { params: {}, system_prompt: '' };
         }
+    }
+
+    function toParamLabel(path) {
+        const key = path.split('.').pop() || path;
+        return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    function flattenParamLeaves(obj, prefix = '', out = []) {
+        if (!obj || typeof obj !== 'object') return out;
+        Object.entries(obj).forEach(([key, value]) => {
+            const path = prefix ? `${prefix}.${key}` : key;
+            if (value && typeof value === 'object' && !Array.isArray(value)) {
+                flattenParamLeaves(value, path, out);
+                return;
+            }
+            out.push({ path, value });
+        });
+        return out;
+    }
+
+    function setNestedValue(target, path, value) {
+        const keys = String(path || '').split('.');
+        if (!keys.length) return;
+        let ref = target;
+        for (let i = 0; i < keys.length - 1; i += 1) {
+            const k = keys[i];
+            if (!ref[k] || typeof ref[k] !== 'object' || Array.isArray(ref[k])) {
+                ref[k] = {};
+            }
+            ref = ref[k];
+        }
+        ref[keys[keys.length - 1]] = value;
+    }
+
+    function getSliderSpec(agentId, path, value) {
+        const key = path.split('.').pop() || '';
+        const numericValue = Number(value);
+        if (!Number.isFinite(numericValue)) {
+            return { min: 0, max: 100, step: 1 };
+        }
+
+        if (key === 'temperature') return { min: 0, max: 1, step: 0.01 };
+        if (key === 'max_tokens') return { min: 64, max: 4096, step: 16 };
+        if (agentId === 'decision_core') return { min: 0, max: 1, step: 0.01 };
+        if (path.startsWith('trend_thresholds.')) return { min: 0, max: 100, step: 1 };
+        if (key.includes('leverage')) return { min: 1, max: 125, step: 1 };
+        if (key.includes('interval') && key.includes('hours')) return { min: 1, max: 48, step: 1 };
+        if (key.includes('lookback') && key.includes('hours')) return { min: 1, max: 240, step: 1 };
+        if (key.includes('window') && key.includes('minutes')) return { min: 5, max: 240, step: 5 };
+        if (key.includes('threshold') || key.includes('pct') || key.includes('ratio')) {
+            const max = numericValue <= 1 ? 1 : Math.max(5, Math.ceil(numericValue * 2));
+            const step = numericValue < 0.1 ? 0.001 : 0.01;
+            return { min: 0, max, step };
+        }
+        if (numericValue >= 1000) {
+            const max = Math.max(numericValue * 2, 1000000);
+            return { min: 0, max, step: Math.max(1, Math.floor(max / 500)) };
+        }
+        if (Number.isInteger(numericValue)) {
+            return { min: 0, max: Math.max(10, numericValue * 3), step: 1 };
+        }
+        return { min: 0, max: Math.max(1, Math.ceil(numericValue * 3 * 100) / 100), step: 0.01 };
+    }
+
+    function readParamsFromPanel(agentId) {
+        const base = deepClone(draftInputs[agentId]?.paramsObj ?? agentSettings.agents[agentId]?.params ?? {});
+        const sourceInputs = panelContainer.querySelectorAll('[data-param-source="true"][data-param-path]');
+        sourceInputs.forEach(el => {
+            const path = el.dataset.paramPath;
+            const type = el.dataset.paramType || 'string';
+            if (!path) return;
+            let value;
+            if (type === 'number') {
+                const n = Number(el.value);
+                if (!Number.isFinite(n)) return;
+                value = n;
+            } else if (type === 'boolean') {
+                value = Boolean(el.checked);
+            } else if (type === 'json') {
+                try {
+                    value = JSON.parse(el.value || 'null');
+                } catch (_) {
+                    value = el.value || '';
+                }
+            } else {
+                value = el.value ?? '';
+            }
+            setNestedValue(base, path, value);
+        });
+        return base;
+    }
+
+    function renderParamControls(agentId, paramsObj) {
+        const container = panelContainer.querySelector('[data-field="params-controls"]');
+        if (!container) return;
+        const leaves = flattenParamLeaves(paramsObj);
+        if (!leaves.length) {
+            container.innerHTML = '<p class="agent-config-param-empty">No parameters available.</p>';
+            return;
+        }
+
+        const html = leaves.map(({ path, value }) => {
+            const safePath = path.replace(/"/g, '&quot;');
+            const label = toParamLabel(path);
+            if (typeof value === 'number' && Number.isFinite(value)) {
+                const spec = getSliderSpec(agentId, path, value);
+                return `
+                    <div class="agent-config-param-item">
+                        <div class="agent-config-param-head">
+                            <span class="agent-config-param-name">${label}</span>
+                            <span class="agent-config-param-value" data-param-display="${safePath}">${value}</span>
+                        </div>
+                        <div class="agent-config-param-controls">
+                            <input type="range" data-param-range="${safePath}" min="${spec.min}" max="${spec.max}" step="${spec.step}" value="${value}" />
+                            <input type="number" data-param-source="true" data-param-type="number" data-param-path="${safePath}" min="${spec.min}" max="${spec.max}" step="${spec.step}" value="${value}" />
+                        </div>
+                    </div>
+                `;
+            }
+            if (typeof value === 'boolean') {
+                return `
+                    <div class="agent-config-param-item agent-config-param-inline">
+                        <label class="agent-config-param-name">${label}</label>
+                        <input type="checkbox" data-param-source="true" data-param-type="boolean" data-param-path="${safePath}" ${value ? 'checked' : ''} />
+                    </div>
+                `;
+            }
+            const stringValue = typeof value === 'string' ? value : JSON.stringify(value ?? '');
+            const type = typeof value === 'string' ? 'string' : 'json';
+            return `
+                <div class="agent-config-param-item">
+                    <label class="agent-config-param-name">${label}</label>
+                    <input type="text" data-param-source="true" data-param-type="${type}" data-param-path="${safePath}" value="${String(stringValue).replace(/"/g, '&quot;')}" />
+                </div>
+            `;
+        }).join('');
+        container.innerHTML = `<div class="agent-config-param-list">${html}</div>`;
+
+        container.querySelectorAll('input[data-param-range]').forEach(rangeEl => {
+            const path = rangeEl.dataset.paramRange;
+            const numberEl = Array.from(
+                container.querySelectorAll('input[data-param-source="true"][data-param-path]')
+            ).find(el => el.dataset.paramPath === path);
+            const displayEl = Array.from(
+                container.querySelectorAll('[data-param-display]')
+            ).find(el => el.dataset.paramDisplay === path);
+            const sync = (nextValue) => {
+                if (numberEl) numberEl.value = nextValue;
+                if (displayEl) displayEl.textContent = nextValue;
+            };
+            rangeEl.addEventListener('input', () => sync(rangeEl.value));
+            if (numberEl) {
+                numberEl.addEventListener('input', () => {
+                    const n = Number(numberEl.value);
+                    if (!Number.isFinite(n)) return;
+                    const min = Number(rangeEl.min);
+                    const max = Number(rangeEl.max);
+                    const clamped = Math.min(max, Math.max(min, n));
+                    rangeEl.value = String(clamped);
+                    if (displayEl) displayEl.textContent = String(clamped);
+                });
+            }
+        });
     }
 
     function renderAgentTabs() {
@@ -4791,18 +4958,18 @@ function renderTradeHistory(trades) {
         });
     }
 
-        function renderAgentPanel(agentId) {
-            if (!agentId) return;
-            ensureAgentConfig(agentId);
-            const def = AGENT_DEFS.find(item => item.id === agentId);
-            const draft = draftInputs[agentId];
-            const paramsText = draft?.paramsText ?? JSON.stringify(agentSettings.agents[agentId].params || {}, null, 2);
-            const promptText = draft?.promptText ?? (agentSettings.agents[agentId].system_prompt || '');
-            const enabledValue = draft?.enabled ?? agentEnabled?.[agentId];
-            const isEnabled = enabledValue === undefined ? true : Boolean(enabledValue);
-            const isRequired = Boolean(def?.required);
+    function renderAgentPanel(agentId) {
+        if (!agentId) return;
+        ensureAgentConfig(agentId);
+        const def = AGENT_DEFS.find(item => item.id === agentId);
+        const draft = draftInputs[agentId];
+        const paramsObj = deepClone(draft?.paramsObj ?? (agentSettings.agents[agentId].params || {}));
+        const promptText = draft?.promptText ?? (agentSettings.agents[agentId].system_prompt || '');
+        const enabledValue = draft?.enabled ?? agentEnabled?.[agentId];
+        const isEnabled = enabledValue === undefined ? true : Boolean(enabledValue);
+        const isRequired = Boolean(def?.required);
 
-            panelContainer.innerHTML = `
+        panelContainer.innerHTML = `
             <div class="agent-config-section">
                 <h4>${def?.label || agentId}</h4>
                 <div class="agent-config-row agent-config-toggle-row">
@@ -4810,8 +4977,8 @@ function renderTradeHistory(trades) {
                     <input type="checkbox" data-field="enabled" ${isEnabled ? 'checked' : ''} ${isRequired ? 'disabled' : ''} />
                 </div>
                 <div class="agent-config-row">
-                    <label>Parameters (JSON)</label>
-                    <textarea data-field="params" rows="10" spellcheck="false"></textarea>
+                    <label>Parameters</label>
+                    <div data-field="params-controls"></div>
                 </div>
                 ${def?.hasPrompt ? `
                 <div class="agent-config-row">
@@ -4821,73 +4988,60 @@ function renderTradeHistory(trades) {
             </div>
         `;
 
-        const paramsEl = panelContainer.querySelector('textarea[data-field="params"]');
-        if (paramsEl) paramsEl.value = paramsText;
         const promptEl = panelContainer.querySelector('textarea[data-field="system_prompt"]');
         if (promptEl) promptEl.value = promptText;
+        renderParamControls(agentId, paramsObj);
     }
 
-        function stashDraft(agentId) {
-            if (!agentId) return;
-            const paramsEl = panelContainer.querySelector('textarea[data-field="params"]');
-            const promptEl = panelContainer.querySelector('textarea[data-field="system_prompt"]');
-            const enabledEl = panelContainer.querySelector('input[data-field="enabled"]');
-            draftInputs[agentId] = {
-                paramsText: paramsEl ? paramsEl.value : '',
-                promptText: promptEl ? promptEl.value : '',
-                enabled: enabledEl ? enabledEl.checked : undefined
-            };
-        }
+    function stashDraft(agentId) {
+        if (!agentId) return;
+        const promptEl = panelContainer.querySelector('textarea[data-field="system_prompt"]');
+        const enabledEl = panelContainer.querySelector('input[data-field="enabled"]');
+        draftInputs[agentId] = {
+            paramsObj: readParamsFromPanel(agentId),
+            promptText: promptEl ? promptEl.value : '',
+            enabled: enabledEl ? enabledEl.checked : undefined
+        };
+    }
 
-        function buildSettingsPayload() {
-            const payload = {
-                agents: JSON.parse(JSON.stringify(agentSettings.agents || {}))
-            };
-            const enabledPayload = {};
-            const applyEnableChange = (localKey, llmKey, enabled) => {
-                if (enabled === true) {
-                    enabledPayload[localKey] = true;
-                } else if (enabled === false) {
-                    enabledPayload[localKey] = false;
-                    if (llmKey) enabledPayload[llmKey] = false;
-                }
-            };
-            AGENT_DEFS.forEach(def => {
-                const draft = draftInputs[def.id];
-                const base = agentSettings.agents[def.id] || { params: {}, system_prompt: '' };
-                const paramsRaw = draft?.paramsText ?? JSON.stringify(base.params || {}, null, 2);
-                const promptRaw = (draft?.promptText ?? base.system_prompt) || '';
-                if (draft?.enabled !== undefined && !def.required) {
-                    if (def.id === 'symbol_selector') {
-                        applyEnableChange('symbol_selector_agent', null, draft.enabled);
-                    } else if (def.id === 'trend_agent') {
-                        applyEnableChange('trend_agent_local', 'trend_agent_llm', draft.enabled);
-                    } else if (def.id === 'setup_agent') {
-                        applyEnableChange('setup_agent_local', 'setup_agent_llm', draft.enabled);
-                    } else if (def.id === 'trigger_agent') {
-                        applyEnableChange('trigger_agent_local', 'trigger_agent_llm', draft.enabled);
-                    } else if (def.id === 'reflection_agent') {
-                        applyEnableChange('reflection_agent_local', 'reflection_agent_llm', draft.enabled);
-                    }
-                }
-                let parsedParams = {};
-                if (paramsRaw && paramsRaw.trim()) {
-                    try {
-                        parsedParams = JSON.parse(paramsRaw);
-                } catch (err) {
-                    activeAgentId = def.id;
-                    renderAgentTabs();
-                    renderAgentPanel(activeAgentId);
-                    throw new Error(`Invalid JSON in ${def.label} parameters`);
+    function buildSettingsPayload() {
+        const payload = {
+            agents: deepClone(agentSettings.agents || {})
+        };
+        const enabledPayload = {};
+        const applyEnableChange = (localKey, llmKey, enabled) => {
+            if (enabled === true) {
+                enabledPayload[localKey] = true;
+            } else if (enabled === false) {
+                enabledPayload[localKey] = false;
+                if (llmKey) enabledPayload[llmKey] = false;
+            }
+        };
+        AGENT_DEFS.forEach(def => {
+            const draft = draftInputs[def.id];
+            const base = agentSettings.agents[def.id] || { params: {}, system_prompt: '' };
+            const paramsObj = deepClone(draft?.paramsObj ?? base.params ?? {});
+            const promptRaw = (draft?.promptText ?? base.system_prompt) || '';
+            if (draft?.enabled !== undefined && !def.required) {
+                if (def.id === 'symbol_selector') {
+                    applyEnableChange('symbol_selector_agent', null, draft.enabled);
+                } else if (def.id === 'trend_agent') {
+                    applyEnableChange('trend_agent_local', 'trend_agent_llm', draft.enabled);
+                } else if (def.id === 'setup_agent') {
+                    applyEnableChange('setup_agent_local', 'setup_agent_llm', draft.enabled);
+                } else if (def.id === 'trigger_agent') {
+                    applyEnableChange('trigger_agent_local', 'trigger_agent_llm', draft.enabled);
+                } else if (def.id === 'reflection_agent') {
+                    applyEnableChange('reflection_agent_local', 'reflection_agent_llm', draft.enabled);
                 }
             }
-                payload.agents[def.id] = {
-                    params: parsedParams,
-                    system_prompt: promptRaw || ''
-                };
-            });
-            return { settings: payload, enabled: enabledPayload };
-        }
+            payload.agents[def.id] = {
+                params: paramsObj,
+                system_prompt: promptRaw || ''
+            };
+        });
+        return { settings: payload, enabled: enabledPayload };
+    }
 
         function updateLlmBadge(llmInfo) {
         if (!llmInfoBadge || !llmProviderText || !llmModelText) return;

@@ -837,7 +837,7 @@ textarea:focus {
 }
 
 .agent-config-row textarea,
-.agent-config-row input[type="text"] {
+.agent-config-row > input[type="text"] {
     background: #161b22;
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 6px;
@@ -846,6 +846,77 @@ textarea:focus {
     font-family: var(--font-mono);
     font-size: 0.78rem;
     min-height: 120px;
+}
+
+.agent-config-param-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.agent-config-param-item {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 8px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.agent-config-param-item.agent-config-param-inline {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.agent-config-param-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+}
+
+.agent-config-param-name {
+    font-size: 0.78rem;
+    color: #cbd5e0;
+}
+
+.agent-config-param-value {
+    font-size: 0.75rem;
+    color: #00ff9d;
+    font-family: var(--font-mono);
+}
+
+.agent-config-param-controls {
+    display: grid;
+    grid-template-columns: 1fr 120px;
+    gap: 8px;
+    align-items: center;
+}
+
+.agent-config-param-controls input[type="range"] {
+    width: 100%;
+    accent-color: #00ff9d;
+}
+
+.agent-config-param-controls input[type="number"],
+.agent-config-param-item input[type="text"] {
+    background: #161b22;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 6px;
+    color: #e2e8f0;
+    padding: 8px;
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    min-height: auto;
+}
+
+.agent-config-param-empty {
+    color: #718096;
+    font-size: 0.78rem;
+    margin: 0;
+    padding: 8px 0;
 }
 
 .agent-config-toggle-row {

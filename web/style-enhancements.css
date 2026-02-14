@@ -768,6 +768,9 @@ textarea:focus {
     width: 900px;
     max-width: 96vw;
     background: #0d1117;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
 }
 
 .agent-config-body {
@@ -775,13 +778,17 @@ textarea:focus {
     grid-template-columns: 220px 1fr;
     gap: 16px;
     padding: 16px;
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
 }
 
 .agent-config-tabs {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    max-height: 60vh;
+    max-height: none;
+    min-height: 0;
     overflow-y: auto;
     padding-right: 6px;
 }
@@ -809,13 +816,15 @@ textarea:focus {
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 10px;
     padding: 16px;
-    min-height: 320px;
+    min-height: 0;
+    overflow-y: auto;
 }
 
 .agent-config-section {
     display: flex;
     flex-direction: column;
     gap: 14px;
+    min-height: 0;
 }
 
 .agent-config-section h4 {
@@ -852,6 +861,9 @@ textarea:focus {
     display: flex;
     flex-direction: column;
     gap: 10px;
+    max-height: 38vh;
+    overflow-y: auto;
+    padding-right: 6px;
 }
 
 .agent-config-param-item {
@@ -917,6 +929,15 @@ textarea:focus {
     font-size: 0.78rem;
     margin: 0;
     padding: 8px 0;
+}
+
+.agent-config-row-params {
+    min-height: 0;
+}
+
+.agent-config-row-prompt textarea {
+    min-height: 160px;
+    max-height: 28vh;
 }
 
 .agent-config-toggle-row {

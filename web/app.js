@@ -4976,12 +4976,12 @@ function renderTradeHistory(trades) {
                     <label>Enable Agent${isRequired ? ' (Required)' : ''}</label>
                     <input type="checkbox" data-field="enabled" ${isEnabled ? 'checked' : ''} ${isRequired ? 'disabled' : ''} />
                 </div>
-                <div class="agent-config-row">
+                <div class="agent-config-row agent-config-row-params">
                     <label>Parameters</label>
                     <div data-field="params-controls"></div>
                 </div>
                 ${def?.hasPrompt ? `
-                <div class="agent-config-row">
+                <div class="agent-config-row agent-config-row-prompt">
                     <label>System Prompt (applies only when LLM is enabled)</label>
                     <textarea data-field="system_prompt" rows="6" spellcheck="false"></textarea>
                 </div>` : ''}

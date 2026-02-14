@@ -2819,10 +2819,13 @@ class MultiAgentTradingBot:
                 exit_test_price = 0.0
                 
                 if self.test_mode:
-                    action_lower = vote_result.action.lower()
+                    normalized_action = normalize_action(
+                        vote_result.action,
+                        position_side=(current_position_info or {}).get('side')
+                    )
                     
                     # Close Logic
-                    if 'close' in action_lower:
+                    if is_close_action(normalized_action):
                         if self.current_symbol in global_state.virtual_positions:
                             pos = global_state.virtual_positions[self.current_symbol]
                             entry_price = pos['entry_price']
@@ -2851,8 +2854,8 @@ class MultiAgentTradingBot:
                             log.warning(f"⚠️ [TEST] Close ignored - No position for {self.current_symbol}")
                     
                     # Open Logic
-                    elif 'long' in action_lower or 'short' in action_lower:
-                        side = 'LONG' if 'long' in action_lower else 'SHORT'
+                    elif is_open_action(normalized_action):
+                        side = 'LONG' if normalized_action == 'open_long' else 'SHORT'
                         # 计算持仓价值
                         position_value = order_params['quantity'] * current_price
                         global_state.virtual_positions[self.current_symbol] = {
@@ -2874,7 +2877,7 @@ class MultiAgentTradingBot:
                 # ✅ Save Trade in persistent history
                 # Logic Update: If CLOSING, try to update previous OPEN record. If failing, save new.
                 
-                is_close_trade_action = 'close' in vote_result.action.lower()
+                is_close_trade_action = is_close_action(vote_result.action)
                 update_success = False
                 
                 if is_close_trade_action:
@@ -2903,7 +2906,7 @@ class MultiAgentTradingBot:
                 
                 # Only save NEW record if it's OPEN action OR if Update Failed (Fallback)
                 if not update_success:
-                    is_open_trade_action = 'open' in order_params['action'].lower()
+                    is_open_trade_action = is_open_action(order_params.get('action'))
                     
                     # For CLOSE actions, find the original open_cycle from trade_history
                     original_open_cycle = 0
@@ -2938,7 +2941,7 @@ class MultiAgentTradingBot:
                         global_state.trade_history.pop()
 
                 # 🎯 递增周期开仓计数器
-                if 'open' in vote_result.action.lower():
+                if is_open_action(vote_result.action):
                      global_state.cycle_positions_opened += 1
                      log.info(f"Positions opened this cycle: {global_state.cycle_positions_opened}/1")
                 
@@ -3019,7 +3022,7 @@ class MultiAgentTradingBot:
                 # ✅ Save Trade in persistent history
                 # Logic Update: If CLOSING, try to update previous OPEN record. If failing, save new.
                 
-                is_close_trade_action = 'close' in order_params['action'].lower()
+                is_close_trade_action = is_close_action(order_params.get('action'))
                 update_success = False
                 
                 if is_close_trade_action:
@@ -3047,7 +3050,7 @@ class MultiAgentTradingBot:
                         log.info(f"📊 Cumulative Realized PnL: ${global_state.cumulative_realized_pnl:.2f}")
                 
                 if not update_success:
-                    is_open_trade_action = 'open' in order_params['action'].lower()
+                    is_open_trade_action = is_open_action(order_params.get('action'))
                     
                     # For CLOSE actions, find the original open_cycle from trade_history
                     original_open_cycle = 0

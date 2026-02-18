@@ -82,6 +82,7 @@ class Config:
             'kimi': os.getenv('KIMI_API_KEY'),
             'minimax': os.getenv('MINIMAX_API_KEY'),
             'glm': os.getenv('GLM_API_KEY'),
+            'openrouter': os.getenv('OPENROUTER_API_KEY'),
         }
         self._config['llm']['api_keys'] = {k: v for k, v in llm_api_keys.items() if v}
 

@@ -1,6 +1,7 @@
-from typing import Dict
+from typing import Dict, Optional
 
 from src.agents.predict_agent import PredictAgent
+from src.agents.predict_result import PredictResult
 from src.features.technical_features import TechnicalFeatureEngineer
 from src.models.prophet_model import ProphetAutoTrainer
 from src.utils.logger import log
@@ -61,7 +62,7 @@ class PredictAgentsProvider:
                 primary_agent,
                 self.symbol_manager.primary_symbol)
 
-    async def predict(self, processed_dfs: Dict[str, "pd.DataFrame"]):
+    async def predict(self, processed_dfs: Dict[str, "pd.DataFrame"]) -> Optional[PredictResult]:
         if self.agent_config.predict_agent and self.symbol_manager.current_symbol in self.predict_agents:
             df_15m_features = self.feature_engineer.build_features(processed_dfs['15m'])
             latest_features = {}
@@ -72,7 +73,7 @@ class PredictAgentsProvider:
                     if isinstance(v, (int, float)) and not isinstance(v, bool)
                 }
 
-            res = await self.predict_agents[self.symbol_manager.current_symbol].predict(latest_features)
+            res = await self.predict_agents[self.symbol_provider.current_symbol].predict(latest_features)
             global_state.prophet_probability = res.probability_up
             p_up_pct = res.probability_up * 100
             direction = "↗UP" if res.probability_up > 0.55 else ("↘DN" if res.probability_up < 0.45 else "➖NEU")

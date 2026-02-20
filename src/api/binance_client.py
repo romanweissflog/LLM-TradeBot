@@ -9,16 +9,18 @@ import asyncio
 from datetime import datetime
 from src.config import config
 from src.utils.logger import log
+from src.server.state import global_state
 
 
 class BinanceClient:
     """Binance API 客户端封装"""
     
-    def __init__(self, api_key: str = None, api_secret: str = None, testnet: bool = None):
+    def __init__(self, api_key: str = None, api_secret: str = None, testnet: bool = None, test_mode: bool = False):
         self.api_key = api_key or config.binance.get('api_key')
         self.api_secret = api_secret or config.binance.get('api_secret')
         self.testnet = testnet if testnet is not None else config.binance.get('testnet', True)
         self.offline = False
+        self.test_mode = test_mode
         
         # 初始化客户端
         try:

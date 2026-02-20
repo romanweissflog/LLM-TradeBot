@@ -6,6 +6,8 @@ from typing import List
 from datetime import datetime
 
 from src.api.binance_client import BinanceClient
+from src.config import Config
+from src.agents.agent_config import AgentConfig
 
 from src.agents.symbol_selector_agent import get_selector  # 🔝 AUTO3 Support
 from src.utils.logger import log
@@ -14,7 +16,8 @@ from src.server.state import global_state
 class SymbolManager:
     def __init__(
         self,
-        config,
+        config: Config,
+        agent_config: AgentConfig,
         client: BinanceClient,
         predict_add_callback,
         test_mode: bool = False
@@ -22,7 +25,8 @@ class SymbolManager:
         self.predict_add_callback = predict_add_callback
         self.test_mode = test_mode
         self.client = client
-        self.symbols = []
+        self._symbols = []
+        self.agent_config = agent_config
 
         # Symbol selector cadence (AUTO1/AUTO3)
         self.selector_interval_sec = 10 * 60
@@ -37,116 +41,139 @@ class SymbolManager:
 
         if env_symbols:
             # Dashboard 设置的币种 (逗号分隔)
-            self.symbols = [s.strip() for s in env_symbols.split(',') if s.strip()]
+            self._symbols = [s.strip() for s in env_symbols.split(',') if s.strip()]
         else:
             # 从 config.yaml 读取
             symbols_config = config.get('trading.symbols', None)
 
             if symbols_config and isinstance(symbols_config, list):
-                self.symbols = symbols_config
+                self._symbols = symbols_config
             else:
                 # 向后兼容: 使用旧版 trading.symbol 配置 (支持 CSV 字符串 "BTCUSDT,ETHUSDT")
                 symbol_str = config.get('trading.symbol', 'AI500_TOP5')  # ✅ 默认 AI500 Top 5
                 if ',' in symbol_str:
-                    self.symbols = [s.strip() for s in symbol_str.split(',') if s.strip()]
+                    self._symbols = [s.strip() for s in symbol_str.split(',') if s.strip()]
                 else:
-                    self.symbols = [symbol_str]
+                    self._symbols = [symbol_str]
 
-        self.use_auto3 = 'AUTO3' in self.symbols
+        self.use_auto3 = 'AUTO3' in self._symbols
 
         # Normalize legacy AUTO2 -> AUTO1
-        if 'AUTO2' in self.symbols:
-            self.symbols = ['AUTO1' if s == 'AUTO2' else s for s in self.symbols]
+        if 'AUTO2' in self._symbols:
+            self._symbols = ['AUTO1' if s == 'AUTO2' else s for s in self._symbols]
 
         if self.use_auto3:
-            self.symbols = [s for s in self.symbols if s not in ('AUTO3', 'AUTO1')]
+            self._symbols = [s for s in self._symbols if s not in ('AUTO3', 'AUTO1')]
             # If AUTO3 was the only symbol, add temporary placeholder (will be replaced at startup)
-            if not self.symbols:
-                self.symbols = ['FETUSDT']  # Temporary, replaced by AUTO3 selection in main()
+            if not self._symbols:
+                self._symbols = ['FETUSDT']  # Temporary, replaced by AUTO3 selection in main()
             log.info("🔝 AUTO3 mode enabled - Startup backtest will run")
 
-        self.use_auto1 = (not self.use_auto3) and ('AUTO1' in self.symbols)
+        self.use_auto1 = (not self.use_auto3) and ('AUTO1' in self._symbols)
         if self.use_auto1:
-            self.symbols = [s for s in self.symbols if s != 'AUTO1']
-            if not self.symbols:
-                self.symbols = ['BTCUSDT']  # Temporary placeholder before selector runs
+            self._symbols = [s for s in self._symbols if s != 'AUTO1']
+            if not self._symbols:
+                self._symbols = ['BTCUSDT']  # Temporary placeholder before selector runs
             log.info("🎯 AUTO1 mode enabled - Symbol selector will run at startup")
 
-        use_ai500 = 'AI500_TOP5' in self.symbols and not self.use_auto3
+        use_ai500 = 'AI500_TOP5' in self._symbols and not self.use_auto3
         if use_ai500:
-            self.symbols.remove('AI500_TOP5')
+            self._symbols.remove('AI500_TOP5')
 
             # Merge and deduplicate
             ai_top5 = self._resolve_ai500_symbols()
-            self.symbols = list(set(self.symbols + ai_top5))
+            self._symbols = list(set(self._symbols + ai_top5))
 
             # Sort to keep stable order
-            self.symbols.sort()
+            self._symbols.sort()
 
         # 🔧 Primary symbol must be in the symbols list
         configured_primary = config.get('trading.primary_symbol', 'BTCUSDT')
-        if configured_primary in self.symbols:
-            self.primary_symbol = configured_primary
+        if configured_primary in self._symbols:
+            self._primary_symbol = configured_primary
         else:
             # Use first symbol if configured primary not in list
-            self.primary_symbol = self.symbols[0]
-            log.info(f"Primary symbol {configured_primary} not in symbols list, using {self.primary_symbol}")
+            self._primary_symbol = self._symbols[0]
+            log.info(f"Primary symbol {configured_primary} not in symbols list, using {self._primary_symbol}")
 
-        self.current_symbol = self.primary_symbol  # 当前处理的交易对
+        self.current_symbol = self._primary_symbol  # 当前处理的交易对
+        global_state.symbols = self._symbols  # 🆕 Sync symbols to global state for API
 
-        global_state.current_symbol = self.current_symbol
-        global_state.symbols = self.symbols  # 🆕 Sync symbols to global state for API
+    @property
+    def symbols(self):
+        return self._symbols
+
+    @symbols.setter
+    def symbols(self, value):
+        self._symbols = value
+
+    @property
+    def current_symbol(self):
+        return self._current_symbol
+
+    @current_symbol.setter
+    def current_symbol(self, value):
+        self._current_symbol = value
+        global_state.current_symbol = value
+
+    @property
+    def primary_symbol(self):
+        return self._primary_symbol
+
+    @primary_symbol.setter
+    def primary_symbol(self, value):
+        self._primary_symbol = value
 
     def reload_symbols(self, config):
         env_symbols = os.environ.get('TRADING_SYMBOLS', '').strip()
 
-        old_symbols = self.symbols.copy()
+        old_symbols = self._symbols.copy()
 
         if env_symbols:
-            self.symbols = [s.strip() for s in env_symbols.split(',') if s.strip()]
+            self._symbols = [s.strip() for s in env_symbols.split(',') if s.strip()]
         else:
             symbols_config = config.get('trading.symbols', None)
             if symbols_config and isinstance(symbols_config, list):
-                self.symbols = symbols_config
+                self._symbols = symbols_config
             else:
                 symbol_str = config.get('trading.symbol', 'AI500_TOP5')
                 if ',' in symbol_str:
-                    self.symbols = [s.strip() for s in symbol_str.split(',') if s.strip()]
+                    self._symbols = [s.strip() for s in symbol_str.split(',') if s.strip()]
                 else:
-                    self.symbols = [symbol_str]
+                    self._symbols = [symbol_str]
 
         # Normalize legacy AUTO2 -> AUTO1
-        if 'AUTO2' in self.symbols:
-            self.symbols = ['AUTO1' if s == 'AUTO2' else s for s in self.symbols]
+        if 'AUTO2' in self._symbols:
+            self._symbols = ['AUTO1' if s == 'AUTO2' else s for s in self._symbols]
 
         # 🔝 AUTO3 Dynamic Resolution (takes priority)
-        self.use_auto3 = 'AUTO3' in self.symbols
+        self.use_auto3 = 'AUTO3' in self._symbols
         if self.use_auto3:
-            self.symbols = [s for s in self.symbols if s not in ('AUTO3', 'AUTO1')]
-            if not self.symbols:
-                self.symbols = ['FETUSDT']
+            self._symbols = [s for s in self._symbols if s not in ('AUTO3', 'AUTO1')]
+            if not self._symbols:
+                self._symbols = ['FETUSDT']
             log.info("🔝 AUTO3 mode enabled - Startup backtest will run")
 
         # AUTO1 Dynamic Selection
-        self.use_auto1 = (not self.use_auto3) and ('AUTO1' in self.symbols)
+        self.use_auto1 = (not self.use_auto3) and ('AUTO1' in self._symbols)
         if self.use_auto1:
-            self.symbols = [s for s in self.symbols if s != 'AUTO1']
-            if not self.symbols:
-                self.symbols = ['BTCUSDT']
+            self._symbols = [s for s in self._symbols if s != 'AUTO1']
+            if not self._symbols:
+                self._symbols = ['BTCUSDT']
             log.info("🎯 AUTO1 mode enabled - Symbol selector will run at startup")
 
         # 🤖 AI500 Dynamic Resolution
-        if 'AI500_TOP5' in self.symbols:
-            self.symbols.remove('AI500_TOP5')
+        if 'AI500_TOP5' in self._symbols:
+            self._symbols.remove('AI500_TOP5')
             ai_top5 = self._resolve_ai500_symbols()
-            self.symbols = list(set(self.symbols + ai_top5))
-            self.symbols.sort()
+            self._symbols = list(set(self._symbols + ai_top5))
+            self._symbols.sort()
 
-        if set(self.symbols) != set(old_symbols):
-            log.info(f"🔄 Trading symbols reloaded: {', '.join(self.symbols)}")
-            global_state.add_log(f"[🔄 CONFIG] Symbols reloaded: {', '.join(self.symbols)}")
+        if set(self._symbols) != set(old_symbols):
+            log.info(f"🔄 Trading symbols reloaded: {', '.join(self._symbols)}")
+            global_state.add_log(f"[🔄 CONFIG] Symbols reloaded: {', '.join(self._symbols)}")
             # Update global state
-            global_state.symbols = self.symbols
+            global_state.symbols = self._symbols
             # Initialize PredictAgent for any new symbols
             self._update_predict_agents()
 
@@ -154,38 +181,48 @@ class SymbolManager:
         new_top5 = self._resolve_ai500_symbols()
 
         # Update symbols list
-        old_symbols = set(self.symbols)
+        old_symbols = set(self._symbols)
         # Remove old AI coins and add new ones
         # Keep non-AI coins unchanged
         major_coins = {'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'}
-        non_ai_symbols = [s for s in self.symbols if s in major_coins]
+        non_ai_symbols = [s for s in self._symbols if s in major_coins]
 
         # Merge with new AI top5
-        self.symbols = list(set(non_ai_symbols + new_top5))
-        self.symbols.sort()
+        self._symbols = list(set(non_ai_symbols + new_top5))
+        self._symbols.sort()
 
         # Update global state
-        global_state.symbols = self.symbols
+        global_state.symbols = self._symbols
 
         # Log changes
-        added = set(self.symbols) - old_symbols
-        removed = old_symbols - set(self.symbols)
+        added = set(self._symbols) - old_symbols
+        removed = old_symbols - set(self._symbols)
         if added or removed:
             log.info(f"📊 AI500 Updated - Added: {added}, Removed: {removed}")
-            log.info(f"📋 Current symbols: {', '.join(self.symbols)}")
+            log.info(f"📋 Current symbols: {', '.join(self._symbols)}")
             for symbol in added:
                 self.predict_add_callback(symbol, horizon='30m')
         else:
             log.info("✅ AI500 Updated - No changes in Top5")
 
-    def run_symbol_selector(self, reason: str = "scheduled") -> None:
+    def run_symbol_selector(
+        self,
+        reason: str = "scheduled",
+        check_for_startup_done: bool = False
+    ) -> None:
+        if not self.agent_config.symbol_selector_agent:
+            return
+        
+        if check_for_startup_done and self.selector_startup_done:
+            return
+        
         now_ts = time.time()
         if reason != "startup" and self.selector_last_run > 0 and (now_ts - self.selector_last_run) < self.selector_interval_sec:
             return
 
         active_symbols = self.get_active_position_symbols()
         if active_symbols:
-            locked = [s for s in self.symbols if s in active_symbols]
+            locked = [s for s in self._symbols if s in active_symbols]
             if not locked:
                 locked = sorted(set(active_symbols))
             log.info(f"🔒 SymbolSelectorAgent skipped (active positions: {', '.join(locked)})")
@@ -212,14 +249,13 @@ class SymbolManager:
                 ) or []
 
             if top_symbols:
-                self.symbols = top_symbols
+                self._symbols = top_symbols
                 self.current_symbol = top_symbols[0]
                 global_state.symbols = top_symbols
-                global_state.current_symbol = self.current_symbol
                 selector_payload = {
                     "mode": "AUTO3" if self.use_auto3 else "AUTO1",
                     "symbols": list(top_symbols),
-                    "symbol": self.current_symbol,
+                    "symbol": self._current_symbol,
                     "direction": None,
                     "change_pct": None,
                     "volume_ratio": None,
@@ -229,7 +265,7 @@ class SymbolManager:
 
                 if not self.use_auto3:
                     auto1 = getattr(selector, "last_auto1", {}) or {}
-                    metrics = auto1.get("results", {}).get(self.current_symbol, {})
+                    metrics = auto1.get("results", {}).get(self._current_symbol, {})
                     change_pct = metrics.get("change_pct")
                     if isinstance(change_pct, (int, float)):
                         if change_pct > 0:
@@ -347,10 +383,10 @@ class SymbolManager:
             return ["FETUSDT", "RENDERUSDT", "TAOUSDT", "NEARUSDT", "GRTUSDT"]
 
     def _update_predict_agents(self, horizon='30m'):
-        for symbol in self.symbols:
+        for symbol in self._symbols:
             self.predict_add_callback(symbol, horizon=horizon)
 
     def _update_primary(self):
-        if self.primary_symbol not in self.symbols:
-            self.primary_symbol = self.current_symbol
-            log.info(f"🔄 Primary symbol updated to {self.primary_symbol} (selector)")
+        if self._primary_symbol not in self._symbols:
+            self._primary_symbol = self._current_symbol
+            log.info(f"🔄 Primary symbol updated to {self._primary_symbol} (selector)")

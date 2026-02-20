@@ -19,6 +19,7 @@ from src.utils.data_saver import DataSaver
 from src.data.processor import MarketDataProcessor  # ✅ Corrected Import
 from src.exchanges import AccountManager, ExchangeAccount, ExchangeType  # ✅ Multi-Account Support
 from src.agents.contracts import SuggestedTrade
+from src.agents.predict_result import PredictResult  # ✅ PredictResult Import
 from src.utils.semantic_converter import SemanticConverter  # ✅ Global Import
 from src.agents.symbol_selector_agent import get_selector  # 🔝 AUTO3 Support
 from src.agents.runtime_events import emit_runtime_event
@@ -89,9 +90,7 @@ class MultiAgentTradingBot:
         print("="*80)
         
         self.config = Config()
-        self.client = BinanceClient()
-        self.symbol_manager = SymbolManager(self.config, self.client, self._predict_add_callback, test_mode)
-        self.ai500_updater = Ai500Updater(self.symbol_manager)  # ✅ AI500 Updater
+        self.client = BinanceClient(test_mode)
 
         self.test_mode = test_mode
         global_state.is_test_mode = test_mode  # Set test mode in global state
@@ -149,6 +148,15 @@ class MultiAgentTradingBot:
         self.agent_registry.register_class('regime_detector_agent', RegimeDetector)
         self.agent_registry.register_class('reflection_agent_llm', ReflectionAgentLLM)
         self.agent_registry.register_class('reflection_agent_local', ReflectionAgent)
+        
+        # Symbol manager and ai500 updater
+        self.symbol_manager = SymbolManager(
+            self.config,
+            self.agent_config,
+            self.client,
+            self._predict_add_callback,
+            test_mode)
+        self.ai500_updater = Ai500Updater(self.symbol_manager)  # ✅ AI500 Updater
         
         # Core Agents (always enabled)
         self.data_sync_agent = DataSyncAgent(self.client)
@@ -326,13 +334,6 @@ class MultiAgentTradingBot:
     
     def _predict_add_callback(self, symbol: str, horizon: str = '30m'):
         self.predict_agents_provider.add_agent_for_symbol(symbol, horizon=horizon)
-
-    def _run_symbol_selector(self, reason: str = "scheduled") -> None:
-        """Run symbol selector and update symbols (AUTO1/AUTO3)."""
-        if not self.agent_config.symbol_selector_agent:
-            return
-
-        self.symbol_manager.run_symbol_selector(reason)
 
     def _sync_open_positions_to_trade_history(self) -> None:
         """Ensure open positions appear in trade history for the UI."""
@@ -756,7 +757,7 @@ class MultiAgentTradingBot:
         snapshot_id: str,
         market_snapshot,
         processed_dfs: Dict[str, "pd.DataFrame"]
-    ) -> Tuple[Dict, Any, Any, Optional[str]]:
+    ) -> Tuple[Dict, PredictResult, Any, Optional[str]]:
         """
         Run quant/predict/reflection in parallel with timeouts and safe fallbacks.
         """
@@ -1042,7 +1043,7 @@ class MultiAgentTradingBot:
         cycle_id: Optional[str],
         processed_dfs: Dict[str, "pd.DataFrame"],
         quant_analysis: Dict[str, Any],
-        predict_result: Any,
+        predict_result: PredictResult,
         reflection_text: Optional[str],
         current_price: float,
         current_position_info: Optional[Dict[str, Any]],
@@ -1831,7 +1832,7 @@ class MultiAgentTradingBot:
             cycle_id=cycle_id
         )
 
-        data_sync_timeout = self._get_agent_timeout('data_sync', 20.0)
+        data_sync_timeout = self._get_agent_timeout('data_sync', 200.0)
         try:
             market_snapshot = await asyncio.wait_for(
                 self.data_sync_agent.fetch_all_timeframes(
@@ -1977,7 +1978,7 @@ class MultiAgentTradingBot:
         snapshot_id: str,
         market_snapshot: Any,
         processed_dfs: Dict[str, "pd.DataFrame"]
-    ) -> Tuple[Dict[str, Any], Any, Any, Optional[str]]:
+    ) -> Tuple[Dict[str, Any], PredictResult, Any, Optional[str]]:
         """Run Step 2 parallel analysts and persist analysis context."""
         self._emit_runtime_event(
             run_id=run_id,
@@ -2043,7 +2044,7 @@ class MultiAgentTradingBot:
         run_id: str,
         cycle_id: Optional[str],
         quant_analysis: Dict[str, Any],
-        predict_result: Any,
+        predict_result: PredictResult,
         processed_dfs: Dict[str, "pd.DataFrame"],
         current_price: float
     ) -> Tuple[Dict[str, Any], Dict[str, Any], str]:
@@ -2630,7 +2631,7 @@ class MultiAgentTradingBot:
         snapshot_id: str,
         processed_dfs: Dict[str, "pd.DataFrame"],
         quant_analysis: Dict[str, Any],
-        predict_result: Any,
+        predict_result: PredictResult,
         reflection_text: Optional[str],
         current_price: float,
         current_position_info: Optional[Dict[str, Any]],
@@ -3237,7 +3238,7 @@ class MultiAgentTradingBot:
             print(f"{'='*80}")
 
         global_state.is_running = True
-        global_state.current_symbol = self.symbol_manager.current_symbol
+        global_state.current_symbol = self.symbol_manager.current_symbol    # maybe not needed
         run_id = f"run_{int(time.time() * 1000)}:{self.symbol_manager.current_symbol}"
 
         cycle_num = global_state.cycle_counter
@@ -3763,7 +3764,6 @@ class MultiAgentTradingBot:
         order_params['action'] = action
         order_params['symbol'] = suggestion_symbol
         self.symbol_manager.current_symbol = suggestion_symbol
-        global_state.current_symbol = suggestion_symbol
 
         try:
             current_price = float(
@@ -3935,7 +3935,7 @@ class MultiAgentTradingBot:
 
     def _collect_selected_agent_outputs(
         self,
-        predict_result=None,
+        predict_result: PredictResult = None,
         reflection_text: Optional[str] = None
     ) -> Dict[str, Any]:
         outputs: Dict[str, Any] = {}
@@ -4479,15 +4479,12 @@ class MultiAgentTradingBot:
                 has_lock = bool(locked_symbols)
 
                 # 🔝 Symbol Selector Agent: run once at startup, then every 10 minutes during wait
-                if (not has_lock
-                        and not self.selector_startup_done
-                        and self.agent_config.symbol_selector_agent):
-                    self._run_symbol_selector(reason="startup")
+                if not has_lock:
+                    self.symbol_manager.run_symbol_selector(reason="startup", check_for_startup_done=True)
 
                 symbols_for_cycle = locked_symbols if has_lock else self.symbol_manager.symbols
                 if has_lock:
                     self.symbol_manager.current_symbol = symbols_for_cycle[0]
-                    global_state.current_symbol = self.symbol_manager.current_symbol
                     global_state.add_log(f"[🔒 SYSTEM] Active position lock: {', '.join(symbols_for_cycle)}")
 
                 # 🧪 Test Mode: Record start of cycle account state (for Net Value Curve)
@@ -4519,7 +4516,6 @@ class MultiAgentTradingBot:
                 latest_prices = {}  # Store latest prices for PnL calculation
                 for symbol in symbols_for_cycle:
                     self.symbol_manager.current_symbol = symbol  # 设置当前处理的交易对
-                    global_state.current_symbol = symbol
                     
                     # Analyze each symbol first without executing OPEN actions
                     result = asyncio.run(self.run_trading_cycle(analyze_only=True))
@@ -4545,7 +4541,6 @@ class MultiAgentTradingBot:
                     # 只执行最优的一个（直接执行已审计建议，避免重复跑完整流程）
                     try:
                         self.symbol_manager.current_symbol = best_decision.symbol
-                        global_state.current_symbol = self.symbol_manager.current_symbol
                         exec_result = self._execute_suggested_open_trade(
                             symbol=self.symbol_manager.current_symbol,
                             suggested=best_decision,
@@ -4623,13 +4618,12 @@ class MultiAgentTradingBot:
                     wait_seconds = current_interval * 60
 
                     # Run symbol selector on schedule (every 10 minutes, skip if holding positions)
-                    # Note: _run_symbol_selector also has internal position check for safety
+                    # Note: symbol_manager.run_symbol_selector also has internal position check for safety
                     has_positions = bool(self.symbol_manager.get_active_position_symbols())
-                    if (self.agent_config.symbol_selector_agent
-                            and (time.time() - self.selector_last_run) >= self.selector_interval_sec
+                    if ((time.time() - self.selector_last_run) >= self.selector_interval_sec
                             and global_state.execution_mode == "Running"
                             and not has_positions):
-                        self._run_symbol_selector(reason="scheduled")
+                        self.symbol_manager.run_symbol_selector(reason="scheduled")
                     
                     # 如果已经等待足够时间，结束等待
                     if elapsed_seconds >= wait_seconds:

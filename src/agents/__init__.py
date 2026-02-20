@@ -24,7 +24,8 @@ from .decision_core_agent import DecisionCoreAgent, VoteResult, SignalWeight
 from .risk_audit_agent import RiskAuditAgent, RiskCheckResult, PositionInfo, RiskLevel
 
 # Optional Agents
-from .predict_agent import PredictAgent, PredictResult
+from .predict_result import PredictResult
+from .predict_agent import PredictAgent
 from .reflection_agent import ReflectionAgent, ReflectionAgentLLM, ReflectionResult
 from .multi_period_agent import MultiPeriodParserAgent
 

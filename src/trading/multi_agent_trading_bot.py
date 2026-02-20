@@ -36,6 +36,8 @@ from .symbol_manager import SymbolManager
 from .ai500_updater import Ai500Updater  # ✅ AI500 Dynamic Updater
 from .predict_agents_provider import PredictAgentsProvider
 
+from src.runner.parallel_analysis_runner import ParallelAnalysesRunner
+
 from src.utils.action_protocol import (
     normalize_action,
     is_open_action,
@@ -45,14 +47,16 @@ from src.utils.action_protocol import (
 
 from src.agents import (
     DataSyncAgent,
-    QuantAnalystAgent,
     DecisionCoreAgent,
     RiskAuditAgent,
     PositionInfo,
-    ReflectionAgent,
-    ReflectionAgentLLM,
     MultiPeriodParserAgent,
     AgentRegistry
+)
+
+from src.agents.reflection import (
+    ReflectionAgentLLM,
+    ReflectionAgentNoLLM
 )
 
 class MultiAgentTradingBot:
@@ -107,7 +111,6 @@ class MultiAgentTradingBot:
         self.take_profit_pct = take_profit_pct
         self.kline_limit = int(kline_limit) if kline_limit and kline_limit > 0 else 300
         
-        
         # 初始化客户端
         self.risk_manager = RiskManager()
         self.execution_engine = ExecutionEngine(self.client, self.risk_manager)
@@ -147,8 +150,6 @@ class MultiAgentTradingBot:
         self._last_agent_config = dict(global_state.agent_config)
         self.agent_registry = AgentRegistry(self.agent_config)
         self.agent_registry.register_class('regime_detector_agent', RegimeDetector)
-        self.agent_registry.register_class('reflection_agent_llm', ReflectionAgentLLM)
-        self.agent_registry.register_class('reflection_agent_local', ReflectionAgent)
         
         # Symbol manager and ai500 updater
         self.symbol_manager = SymbolManager(
@@ -161,7 +162,6 @@ class MultiAgentTradingBot:
         
         # Core Agents (always enabled)
         self.data_sync_agent = DataSyncAgent(self.client)
-        self.quant_analyst = QuantAnalystAgent()
         self.decision_core = DecisionCoreAgent()
         self.multi_period_agent = MultiPeriodParserAgent()
         self.risk_audit = RiskAuditAgent(
@@ -213,19 +213,20 @@ class MultiAgentTradingBot:
         self.reflection_agent = None
         if self.agent_config.reflection_agent_llm or self.agent_config.reflection_agent_local:
             if self.agent_config.reflection_agent_llm:
-                self.reflection_agent = self.agent_registry.get('reflection_agent_llm')
-                if self.reflection_agent is not None:
-                    print("  ✅ ReflectionAgentLLM ready")
-                else:
-                    print("  ⚠️ ReflectionAgentLLM init failed")
+                self.reflection_agent = ReflectionAgentLLM(self.agent_config)
             else:
-                self.reflection_agent = self.agent_registry.get('reflection_agent_local')
-                if self.reflection_agent is not None:
-                    print("  ✅ ReflectionAgent ready (no LLM)")
-                else:
-                    print("  ⚠️ ReflectionAgent init failed")
+                self.reflection_agent = ReflectionAgentNoLLM()
         else:
             print("  ⏭️ ReflectionAgent disabled")
+
+        self.parallel_analyses_runner = ParallelAnalysesRunner(
+            self.config,
+            self.agent_config,
+            self.symbol_manager,
+            self.predict_agents_provider,
+            self.reflection_agent,
+            self.saver
+        )
         
         print(f"\n⚙️  Trading Config:")
         print(f"  - Symbols: {', '.join(self.symbol_manager.symbols)}")
@@ -258,7 +259,6 @@ class MultiAgentTradingBot:
             from src.agents.trend_agent import TrendAgentLLM
             from src.agents.setup_agent import SetupAgentLLM
             from src.agents.trigger_agent import TriggerAgentLLM
-            from src.agents.reflection_agent import ReflectionAgentLLM
             
             # 1. Collect LLM Engine info (Decision Core)
             llm_info = {
@@ -292,13 +292,10 @@ class MultiAgentTradingBot:
             except Exception: pass
             
             # Reflection Agent
-            if self.reflection_agent and isinstance(self.reflection_agent, ReflectionAgentLLM):
-                prompts["reflection_agent"] = self.reflection_agent._build_system_prompt()
-            else:
-                try:
-                    reflection_llm = ReflectionAgentLLM()
-                    prompts["reflection_agent"] = reflection_llm._build_system_prompt()
-                except Exception: pass
+            if self.reflection_agent:
+                prompt = self.reflection_agent.build_system_prompt()
+                if prompt:
+                    prompts["reflection_agent"] = prompt
             
             global_state.agent_prompts = prompts
             log.info(f"📊 LLM metadata updated: {llm_info['provider']} ({llm_info['model']}), {len(prompts)} prompts collected")
@@ -461,18 +458,10 @@ class MultiAgentTradingBot:
         if self.agent_config.reflection_agent_llm or self.agent_config.reflection_agent_local:
             if self.agent_config.reflection_agent_llm:
                 if not isinstance(self.reflection_agent, ReflectionAgentLLM):
-                    self.reflection_agent = self.agent_registry.get('reflection_agent_llm')
-                    if self.reflection_agent is not None:
-                        log.info("✅ ReflectionAgentLLM enabled (runtime)")
-                    else:
-                        log.warning("⚠️ ReflectionAgentLLM enable failed (runtime)")
+                    self.reflection_agent = ReflectionAgentLLM(self.agent_config)
             else:
-                if not isinstance(self.reflection_agent, ReflectionAgent):
-                    self.reflection_agent = self.agent_registry.get('reflection_agent_local')
-                    if self.reflection_agent is not None:
-                        log.info("✅ ReflectionAgent (no LLM) enabled (runtime)")
-                    else:
-                        log.warning("⚠️ ReflectionAgent enable failed (runtime)")
+                if not isinstance(self.reflection_agent, ReflectionAgentNoLLM):
+                    self.reflection_agent = ReflectionAgentNoLLM()
         else:
             self.reflection_agent = None
 
@@ -661,92 +650,6 @@ class MultiAgentTradingBot:
             return val if val > 0 else float(default_seconds)
         except (TypeError, ValueError):
             return float(default_seconds)
-
-    async def _run_parallel_analysis(
-        self,
-        *,
-        run_id: str,
-        cycle_id: Optional[str],
-        snapshot_id: str,
-        market_snapshot,
-        processed_dfs: Dict[str, "pd.DataFrame"]
-    ) -> Tuple[Dict, PredictResult, Any, Optional[str]]:
-        """
-        Run quant/predict/reflection in parallel with timeouts and safe fallbacks.
-        """
-        async def quant_task():
-            res = await self.quant_analyst.analyze_all_timeframes(market_snapshot)
-            trend_score = res.get('trend', {}).get('total_trend_score', 0)
-            osc_score = res.get('oscillator', {}).get('total_osc_score', 0)
-            sent_score = res.get('sentiment', {}).get('total_sentiment_score', 0)
-            quant_msg = f"Analysis Complete. Trend={trend_score:+.0f} | Osc={osc_score:+.0f} | Sent={sent_score:+.0f}"
-            global_state.add_agent_message("quant_analyst", quant_msg, level="success")
-            return res
-
-        async def predict_task():
-            prediction = await self.predict_agents_provider.predict(processed_dfs)
-            if prediction:
-                self.saver.save_prediction(asdict(prediction), self.symbol_manager.current_symbol, snapshot_id, cycle_id=cycle_id)
-            return prediction
-
-        async def reflection_task():
-            total_trades = len(global_state.trade_history)
-            if self.reflection_agent and self.reflection_agent.should_reflect(total_trades):
-                global_state.add_agent_message("reflection_agent", "🔍 Reflecting on recent trade performance...", level="info")
-                trades_to_analyze = global_state.trade_history[-10:]
-                res = await self.reflection_agent.generate_reflection(trades_to_analyze)
-                if res:
-                    reflection_text = res.to_prompt_text()
-                    global_state.last_reflection = res.raw_response
-                    global_state.last_reflection_text = reflection_text
-                    global_state.reflection_count = self.reflection_agent.reflection_count
-                    global_state.add_agent_message(
-                        "reflection_agent",
-                        f"Reflected on {len(trades_to_analyze)} trades. Insight: {res.insight}",
-                        level="info"
-                    )
-                return res
-            return None
-
-        quant_timeout = self._get_agent_timeout('quant_analyst', 25.0)
-        predict_timeout = self._get_agent_timeout('predict_agent', 30.0)
-        reflection_timeout = self._get_agent_timeout('reflection_agent', 45.0)
-
-        analysis_results = await asyncio.gather(
-            run_task_with_timeout(
-                run_id=run_id,
-                cycle_id=cycle_id,
-                agent_name="quant_analyst",
-                timeout_seconds=quant_timeout,
-                task_factory=quant_task,
-                symbol=self.symbol_manager.current_symbol,
-                fallback={}
-            ),
-            run_task_with_timeout(
-                run_id=run_id,
-                cycle_id=cycle_id,
-                agent_name="predict_agent",
-                timeout_seconds=predict_timeout,
-                task_factory=predict_task,
-                symbol=self.symbol_manager.current_symbol,
-                fallback=None
-            ),
-            run_task_with_timeout(
-                run_id=run_id,
-                cycle_id=cycle_id,
-                agent_name="reflection_agent",
-                timeout_seconds=reflection_timeout,
-                task_factory=reflection_task,
-                symbol=self.symbol_manager.current_symbol,
-                fallback=None
-            )
-        )
-
-        quant_analysis = analysis_results[0] if isinstance(analysis_results[0], dict) else {}
-        predict_result = analysis_results[1]
-        reflection_result = analysis_results[2]
-        reflection_text = reflection_result.to_prompt_text() if reflection_result else global_state.last_reflection_text
-        return quant_analysis, predict_result, reflection_result, reflection_text
 
     async def _run_semantic_analysis(
         self,
@@ -1927,7 +1830,7 @@ class MultiAgentTradingBot:
                 print("[Step 2/4] 👥 Multi-Agent Analysis (Parallel)...")
             global_state.add_log(f"[📊 SYSTEM] Parallel analysis started for {self.symbol_manager.current_symbol}")
 
-            quant_analysis, predict_result, reflection_result, reflection_text = await self._run_parallel_analysis(
+            quant_analysis, predict_result, reflection_result, reflection_text = await self.parallel_analyses_runner.run(
                 run_id=run_id,
                 cycle_id=cycle_id,
                 snapshot_id=snapshot_id,

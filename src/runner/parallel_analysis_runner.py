@@ -1,0 +1,128 @@
+import asyncio
+
+from typing import Dict, Optional, Tuple
+from dataclasses import asdict
+
+from src.config import Config
+from src.agents.agent_config import AgentConfig
+
+from src.utils.data_saver import DataSaver
+from src.agents.quant_analyst_agent import QuantAnalystAgent
+from src.agents.reflection import (
+    ReflectionAgent,
+    ReflectionResult
+)
+
+from src.trading.symbol_manager import SymbolManager
+from src.trading.predict_agents_provider import PredictAgentsProvider
+from src.agents.predict_result import PredictResult
+
+from src.server.state import global_state
+
+from src.utils.task_util import run_task_with_timeout
+from src.utils.agents_util import get_agent_timeout
+
+class ParallelAnalysesRunner:
+    def __init__(
+        self,
+        config: Config,
+        agent_config: AgentConfig,
+        symbol_manager: SymbolManager,
+        predict_agents_provider: PredictAgentsProvider,
+        reflection_agent: Optional[ReflectionAgent],
+        saver: DataSaver,
+    ):
+        self.config = config
+        self.agent_config = agent_config
+        self.symbol_manager = symbol_manager
+        self.predict_agents_provider = predict_agents_provider
+        self.saver = saver
+        self.reflection_agent = reflection_agent
+
+        self.quant_analyst = QuantAnalystAgent()
+
+    async def run(
+        self,
+        *,
+        run_id: str,
+        cycle_id: Optional[str],
+        snapshot_id: str,
+        market_snapshot,
+        processed_dfs: Dict[str, "pd.DataFrame"]
+    ) -> Tuple[Dict, Optional[PredictResult], Optional[ReflectionResult], Optional[str]]:
+        """
+        Run quant/predict/reflection in parallel with timeouts and safe fallbacks.
+        """
+        async def quant_task():
+            res = await self.quant_analyst.analyze_all_timeframes(market_snapshot)
+            trend_score = res.get('trend', {}).get('total_trend_score', 0)
+            osc_score = res.get('oscillator', {}).get('total_osc_score', 0)
+            sent_score = res.get('sentiment', {}).get('total_sentiment_score', 0)
+            quant_msg = f"Analysis Complete. Trend={trend_score:+.0f} | Osc={osc_score:+.0f} | Sent={sent_score:+.0f}"
+            global_state.add_agent_message("quant_analyst", quant_msg, level="success")
+            return res
+
+        async def predict_task() -> Optional[PredictResult]:
+            prediction = await self.predict_agents_provider.predict(processed_dfs)
+            if prediction:
+                self.saver.save_prediction(asdict(prediction), self.symbol_manager.current_symbol, snapshot_id, cycle_id=cycle_id)
+            return prediction
+
+        async def reflection_task() -> Optional[ReflectionResult]:
+            total_trades = len(global_state.trade_history)
+            if self.reflection_agent and self.reflection_agent.should_reflect(total_trades):
+                global_state.add_agent_message("reflection_agent", "🔍 Reflecting on recent trade performance...", level="info")
+                trades_to_analyze = global_state.trade_history[-10:]
+                res = await self.reflection_agent.generate_reflection(trades_to_analyze)
+                if res:
+                    reflection_text = res.to_prompt_text()
+                    global_state.last_reflection = res.raw_response
+                    global_state.last_reflection_text = reflection_text
+                    global_state.reflection_count = self.reflection_agent.reflection_count
+                    global_state.add_agent_message(
+                        "reflection_agent",
+                        f"Reflected on {len(trades_to_analyze)} trades. Insight: {res.insight}",
+                        level="info"
+                    )
+                return res
+            return None
+
+        quant_timeout = get_agent_timeout(self.config, self.agent_config, 'quant_analyst', 25.0)
+        predict_timeout = get_agent_timeout(self.config, self.agent_config, 'predict_agent', 30.0)
+        reflection_timeout = get_agent_timeout(self.config, self.agent_config, 'reflection_agent', 45.0)
+
+        analysis_results = await asyncio.gather(
+            run_task_with_timeout(
+                run_id=run_id,
+                cycle_id=cycle_id,
+                agent_name="quant_analyst",
+                timeout_seconds=quant_timeout,
+                task_factory=quant_task,
+                symbol=self.symbol_manager.current_symbol,
+                fallback={}
+            ),
+            run_task_with_timeout(
+                run_id=run_id,
+                cycle_id=cycle_id,
+                agent_name="predict_agent",
+                timeout_seconds=predict_timeout,
+                task_factory=predict_task,
+                symbol=self.symbol_manager.current_symbol,
+                fallback=None
+            ),
+            run_task_with_timeout(
+                run_id=run_id,
+                cycle_id=cycle_id,
+                agent_name="reflection_agent",
+                timeout_seconds=reflection_timeout,
+                task_factory=reflection_task,
+                symbol=self.symbol_manager.current_symbol,
+                fallback=None
+            )
+        )
+
+        quant_analysis = analysis_results[0] if isinstance(analysis_results[0], dict) else {}
+        predict_result = analysis_results[1]
+        reflection_result = analysis_results[2]
+        reflection_text = reflection_result.to_prompt_text() if reflection_result else global_state.last_reflection_text
+        return quant_analysis, predict_result, reflection_result, reflection_text

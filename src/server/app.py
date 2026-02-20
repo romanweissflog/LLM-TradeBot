@@ -656,7 +656,7 @@ def _build_default_agent_settings() -> Dict[str, Any]:
 
     # Reflection prompt
     try:
-        from src.agents.reflection_agent import ReflectionAgent
+        from src.agents.reflection.reflection_agent import ReflectionAgent
         inst = ReflectionAgent.__new__(ReflectionAgent)
         defaults["agents"]["reflection_agent"] = {
             "params": {"temperature": 0.7, "max_tokens": 1500},

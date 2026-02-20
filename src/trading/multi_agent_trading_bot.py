@@ -771,7 +771,7 @@ class MultiAgentTradingBot:
             return res
 
         async def predict_task():
-            prediction = self.predict_agents_provider.predict(processed_dfs)
+            prediction = await self.predict_agents_provider.predict(processed_dfs)
             if prediction:
                 self.saver.save_prediction(asdict(prediction), self.symbol_manager.current_symbol, snapshot_id, cycle_id=cycle_id)
             return prediction

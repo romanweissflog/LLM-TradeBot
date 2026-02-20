@@ -73,7 +73,7 @@ class PredictAgentsProvider:
                     if isinstance(v, (int, float)) and not isinstance(v, bool)
                 }
 
-            res = await self.predict_agents[self.symbol_provider.current_symbol].predict(latest_features)
+            res = await self.predict_agents[self.symbol_manager.current_symbol].predict(latest_features)
             global_state.prophet_probability = res.probability_up
             p_up_pct = res.probability_up * 100
             direction = "↗UP" if res.probability_up > 0.55 else ("↘DN" if res.probability_up < 0.45 else "➖NEU")

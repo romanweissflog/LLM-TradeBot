@@ -124,7 +124,7 @@ class SymbolManager:
     def primary_symbol(self, value):
         self._primary_symbol = value
 
-    def reload_symbols(self, config):
+    def reload_symbols(self, config) -> bool:
         env_symbols = os.environ.get('TRADING_SYMBOLS', '').strip()
 
         old_symbols = self._symbols.copy()
@@ -176,6 +176,9 @@ class SymbolManager:
             global_state.symbols = self._symbols
             # Initialize PredictAgent for any new symbols
             self._update_predict_agents()
+            return True
+        
+        return False
 
     def update_ai500(self):
         new_top5 = self._resolve_ai500_symbols()

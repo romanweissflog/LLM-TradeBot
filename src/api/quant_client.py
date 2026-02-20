@@ -56,7 +56,6 @@ class QuantClient:
         获取指定币种的量化深度数据
         """
         url = f"{self.BASE_URL}/ai500/{symbol}?include=netflow,oi,price&auth={self.auth_token}"
-        log.warning(f"DEBUG: {url}")
         
         try:
             session = await self._get_session()

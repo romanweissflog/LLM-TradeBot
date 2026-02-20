@@ -22,7 +22,8 @@ from src.agents.contracts import SuggestedTrade
 from src.agents.predict_result import PredictResult  # ✅ PredictResult Import
 from src.utils.semantic_converter import SemanticConverter  # ✅ Global Import
 from src.agents.symbol_selector_agent import get_selector  # 🔝 AUTO3 Support
-from src.agents.runtime_events import emit_runtime_event
+from src.agents.runtime_events import emit_global_runtime_event, emit_cycle_pipeline_end
+from src.utils.task_util import run_task_with_timeout
 from src.agents.regime_detector_agent import RegimeDetector  # ✅ Market Regime Detection
 
 from src.utils.logger import log
@@ -323,12 +324,10 @@ class MultiAgentTradingBot:
                 self._update_llm_metadata()
         except Exception as e:
             log.warning(f"⚠️ Failed to reload LLM engine: {e}")
-            
-        old_symbols = self.symbol_manager.symbols.copy()
 
-        self.symbol_manager.reload_symbols(self.config)
+        need_reload = self.symbol_manager.reload_symbols(self.config)
             
-        if set(self.symbol_manager.symbols) != set(old_symbols):            
+        if need_reload:
             # Refresh LLM metadata in case config changed
             self._update_llm_metadata()
     
@@ -663,92 +662,6 @@ class MultiAgentTradingBot:
         except (TypeError, ValueError):
             return float(default_seconds)
 
-    def _emit_runtime_event(
-        self,
-        *,
-        run_id: str,
-        stream: str,
-        agent: str,
-        phase: str,
-        symbol: Optional[str] = None,
-        cycle_id: Optional[str] = None,
-        data: Optional[Dict[str, Any]] = None
-    ) -> None:
-        emit_runtime_event(
-            shared_state=global_state,
-            run_id=run_id,
-            stream=stream,
-            agent=agent,
-            phase=phase,
-            symbol=symbol or self.symbol_manager.current_symbol,
-            cycle_id=cycle_id,
-            data=data or {}
-        )
-
-    async def _run_task_with_timeout(
-        self,
-        *,
-        run_id: str,
-        cycle_id: Optional[str],
-        agent_name: str,
-        timeout_seconds: float,
-        task_factory,
-        fallback=None,
-        log_errors: bool = True
-    ):
-        """
-        Execute one async task with timeout and standardized runtime events.
-        """
-        self._emit_runtime_event(
-            run_id=run_id,
-            stream="lifecycle",
-            agent=agent_name,
-            phase="start",
-            cycle_id=cycle_id,
-            data={"timeout_seconds": timeout_seconds}
-        )
-        started = time.time()
-        try:
-            result = await asyncio.wait_for(task_factory(), timeout=timeout_seconds)
-            duration_ms = int((time.time() - started) * 1000)
-            self._emit_runtime_event(
-                run_id=run_id,
-                stream="lifecycle",
-                agent=agent_name,
-                phase="end",
-                cycle_id=cycle_id,
-                data={"status": "ok", "duration_ms": duration_ms}
-            )
-            return result
-        except asyncio.TimeoutError:
-            duration_ms = int((time.time() - started) * 1000)
-            msg = f"⏱️ {agent_name} timeout after {timeout_seconds:.1f}s, degraded fallback used"
-            if log_errors:
-                log.warning(msg)
-            global_state.add_agent_message(agent_name, msg, level="warning")
-            self._emit_runtime_event(
-                run_id=run_id,
-                stream="error",
-                agent=agent_name,
-                phase="timeout",
-                cycle_id=cycle_id,
-                data={"status": "timeout", "duration_ms": duration_ms, "timeout_seconds": timeout_seconds}
-            )
-            return fallback
-        except Exception as e:
-            duration_ms = int((time.time() - started) * 1000)
-            if log_errors:
-                log.error(f"❌ {agent_name} failed: {e}")
-            self._emit_runtime_event(
-                run_id=run_id,
-                stream="error",
-                agent=agent_name,
-                phase="error",
-                cycle_id=cycle_id,
-                data={"status": "error", "duration_ms": duration_ms, "error": str(e)}
-            )
-            return fallback
-
     async def _run_parallel_analysis(
         self,
         *,
@@ -800,28 +713,31 @@ class MultiAgentTradingBot:
         reflection_timeout = self._get_agent_timeout('reflection_agent', 45.0)
 
         analysis_results = await asyncio.gather(
-            self._run_task_with_timeout(
+            run_task_with_timeout(
                 run_id=run_id,
                 cycle_id=cycle_id,
                 agent_name="quant_analyst",
                 timeout_seconds=quant_timeout,
                 task_factory=quant_task,
+                symbol=self.symbol_manager.current_symbol,
                 fallback={}
             ),
-            self._run_task_with_timeout(
+            run_task_with_timeout(
                 run_id=run_id,
                 cycle_id=cycle_id,
                 agent_name="predict_agent",
                 timeout_seconds=predict_timeout,
                 task_factory=predict_task,
+                symbol=self.symbol_manager.current_symbol,
                 fallback=None
             ),
-            self._run_task_with_timeout(
+            run_task_with_timeout(
                 run_id=run_id,
                 cycle_id=cycle_id,
                 agent_name="reflection_agent",
                 timeout_seconds=reflection_timeout,
                 task_factory=reflection_task,
+                symbol=self.symbol_manager.current_symbol,
                 fallback=None
             )
         )
@@ -869,11 +785,12 @@ class MultiAgentTradingBot:
         if not (hasattr(self, '_headless_mode') and self._headless_mode):
             print("[Step 2.5/5] 🤖 Multi-Agent Semantic Analysis...")
 
-        self._emit_runtime_event(
+        emit_global_runtime_event(
             run_id=run_id,
             stream="lifecycle",
             agent="semantic_agents",
             phase="start",
+            symbol=self.symbol_manager.current_symbol,
             cycle_id=cycle_id
         )
 
@@ -952,12 +869,13 @@ class MultiAgentTradingBot:
             if tasks:
                 semantic_timeout = self._get_agent_timeout('semantic_agent', 35.0)
                 wrapped_tasks = {
-                    key: self._run_task_with_timeout(
+                    key: run_task_with_timeout(
                         run_id=run_id,
                         cycle_id=cycle_id,
                         agent_name=f"{key}_agent",
                         timeout_seconds=semantic_timeout,
                         task_factory=(lambda fut=fut: fut),
+                        symbol=self.symbol_manager.current_symbol,
                         fallback=None
                     )
                     for key, fut in tasks.items()
@@ -1008,12 +926,13 @@ class MultiAgentTradingBot:
                     )
                     global_state.add_agent_message("trigger_agent", summary, level="info")
 
-            self._emit_runtime_event(
+            emit_global_runtime_event(
                 run_id=run_id,
                 stream="lifecycle",
                 agent="semantic_agents",
                 phase="end",
                 cycle_id=cycle_id,
+                symbol=self.symbol_manager.current_symbol,
                 data={"count": len(analyses)}
             )
             return analyses
@@ -1026,12 +945,13 @@ class MultiAgentTradingBot:
                 'trigger': f"Trigger analysis unavailable: {e}"
             }
             global_state.semantic_analyses = fallback
-            self._emit_runtime_event(
+            emit_global_runtime_event(
                 run_id=run_id,
                 stream="error",
                 agent="semantic_agents",
                 phase="error",
                 cycle_id=cycle_id,
+                symbol=self.symbol_manager.current_symbol,
                 data={"error": str(e)}
             )
             return fallback
@@ -1052,12 +972,13 @@ class MultiAgentTradingBot:
         """
         Build final decision payload (forced-exit/fast/LLM/rule) and convert to VoteResult.
         """
-        self._emit_runtime_event(
+        emit_global_runtime_event(
             run_id=run_id,
             stream="lifecycle",
             agent="decision_router",
             phase="start",
-            cycle_id=cycle_id
+            cycle_id=cycle_id,
+            symbol=self.symbol_manager.current_symbol
         )
 
         selected_agent_outputs = self._collect_selected_agent_outputs(
@@ -1178,7 +1099,7 @@ class MultiAgentTradingBot:
                 llm_perspective_timeout = self._get_agent_timeout('llm_perspective', 45.0)
                 loop = asyncio.get_running_loop()
                 bull_p, bear_p = await asyncio.gather(
-                    self._run_task_with_timeout(
+                    run_task_with_timeout(
                         run_id=run_id,
                         cycle_id=cycle_id,
                         agent_name="bull_agent",
@@ -1186,13 +1107,14 @@ class MultiAgentTradingBot:
                         task_factory=lambda: loop.run_in_executor(
                             None, self.strategy_engine.get_bull_perspective, market_context_text
                         ),
+                        symbol=self.symbol_manager.current_symbol,
                         fallback={
                             "stance": "NEUTRAL",
                             "bullish_reasons": "Perspective timeout",
                             "bull_confidence": 50
                         }
                     ),
-                    self._run_task_with_timeout(
+                    run_task_with_timeout(
                         run_id=run_id,
                         cycle_id=cycle_id,
                         agent_name="bear_agent",
@@ -1200,6 +1122,7 @@ class MultiAgentTradingBot:
                         task_factory=lambda: loop.run_in_executor(
                             None, self.strategy_engine.get_bear_perspective, market_context_text
                         ),
+                        symbol=self.symbol_manager.current_symbol,
                         fallback={
                             "stance": "NEUTRAL",
                             "bearish_reasons": "Perspective timeout",
@@ -1345,12 +1268,13 @@ class MultiAgentTradingBot:
             position=price_position_info
         )
 
-        self._emit_runtime_event(
+        emit_global_runtime_event(
             run_id=run_id,
             stream="lifecycle",
             agent="decision_router",
             phase="end",
             cycle_id=cycle_id,
+            symbol=self.symbol_manager.current_symbol,
             data={
                 "action": vote_result.action,
                 "confidence": vote_result.confidence,
@@ -1469,12 +1393,13 @@ class MultiAgentTradingBot:
         regime_result: Optional[Dict[str, Any]]
     ) -> Tuple[Dict[str, Any], Any, float, Optional[PositionInfo]]:
         """Run guardian audit stage and return order params + audit result."""
-        self._emit_runtime_event(
+        emit_global_runtime_event(
             run_id=run_id,
             stream="lifecycle",
             agent="risk_audit",
             phase="start",
-            cycle_id=cycle_id
+            cycle_id=cycle_id,
+            symbol=self.symbol_manager.current_symbol
         )
 
         regime_txt = vote_result.regime.get('regime', 'Unknown') if vote_result.regime else 'Unknown'
@@ -1534,33 +1459,36 @@ class MultiAgentTradingBot:
                 f"TIMEOUT | audit>{risk_timeout:.1f}s, blocked by safety policy",
                 level="warning"
             )
-            self._emit_runtime_event(
+            emit_global_runtime_event(
                 run_id=run_id,
                 stream="error",
                 agent="risk_audit",
                 phase="timeout",
                 cycle_id=cycle_id,
+                symbol=self.symbol_manager.current_symbol,
                 data={"timeout_seconds": risk_timeout}
             )
             audit_result = fallback_audit
         except Exception as e:
-            self._emit_runtime_event(
+            emit_global_runtime_event(
                 run_id=run_id,
                 stream="error",
                 agent="risk_audit",
                 phase="error",
                 cycle_id=cycle_id,
+                symbol=self.symbol_manager.current_symbol,
                 data={"error": str(e)}
             )
             log.error(f"❌ risk_audit failed, blocking decision by fallback: {e}")
             audit_result = fallback_audit
 
-        self._emit_runtime_event(
+        emit_global_runtime_event(
             run_id=run_id,
             stream="lifecycle",
             agent="risk_audit",
             phase="end",
             cycle_id=cycle_id,
+            symbol=self.symbol_manager.current_symbol,
             data={
                 "passed": audit_result.passed,
                 "risk_level": audit_result.risk_level.value
@@ -1824,12 +1752,13 @@ class MultiAgentTradingBot:
             print("\n[Step 1/4] 🕵️ The Oracle (Data Agent) - Fetching data...")
         global_state.oracle_status = "Fetching Data..."
         global_state.add_agent_message("system", f"Fetching market data for {self.symbol_manager.current_symbol}...", level="info")
-        self._emit_runtime_event(
+        emit_global_runtime_event(
             run_id=run_id,
             stream="lifecycle",
             agent="oracle",
             phase="start",
-            cycle_id=cycle_id
+            cycle_id=cycle_id,
+            symbol=self.symbol_manager.current_symbol
         )
 
         data_sync_timeout = self._get_agent_timeout('data_sync', 200.0)
@@ -1846,12 +1775,13 @@ class MultiAgentTradingBot:
             log.error(error_msg)
             global_state.add_log(f"[🚨 CRITICAL] {error_msg}")
             global_state.oracle_status = "DATA ERROR"
-            self._emit_runtime_event(
+            emit_global_runtime_event(
                 run_id=run_id,
                 stream="error",
                 agent="oracle",
                 phase="timeout",
                 cycle_id=cycle_id,
+                symbol=self.symbol_manager.current_symbol,
                 data={"error_type": "api_timeout", "timeout_seconds": data_sync_timeout}
             )
             return StageResult(early_result={
@@ -1867,12 +1797,13 @@ class MultiAgentTradingBot:
             log.error(error_msg)
             global_state.add_log(f"[🚨 CRITICAL] {error_msg}")
             global_state.oracle_status = "DATA ERROR"
-            self._emit_runtime_event(
+            emit_global_runtime_event(
                 run_id=run_id,
                 stream="error",
                 agent="oracle",
                 phase="error",
                 cycle_id=cycle_id,
+                symbol=self.symbol_manager.current_symbol,
                 data={"error_type": "api_failure", "error": str(e)}
             )
             return StageResult(early_result={
@@ -1896,12 +1827,13 @@ class MultiAgentTradingBot:
             for err in data_errors:
                 print(f"   ❌ {err}")
             print(f"{'='*60}\n")
-            self._emit_runtime_event(
+            emit_global_runtime_event(
                 run_id=run_id,
                 stream="error",
                 agent="oracle",
                 phase="error",
                 cycle_id=cycle_id,
+                symbol=self.symbol_manager.current_symbol,
                 data={"error_type": "data_incomplete", "errors": data_errors}
             )
             return StageResult(early_result={
@@ -1933,12 +1865,13 @@ class MultiAgentTradingBot:
 
         data_readiness = self._assess_data_readiness(processed_dfs)
         if not data_readiness['is_ready']:
-            self._emit_runtime_event(
+            emit_global_runtime_event(
                 run_id=run_id,
                 stream="lifecycle",
                 agent="oracle",
                 phase="end",
                 cycle_id=cycle_id,
+                symbol=self.symbol_manager.current_symbol,
                 data={"status": "warmup"}
             )
             return StageResult(early_result=self._build_warmup_wait_result(
@@ -1955,12 +1888,13 @@ class MultiAgentTradingBot:
             snapshots[self.symbol_manager.current_symbol] = indicator_snapshot
             global_state.indicator_snapshot = snapshots
 
-        self._emit_runtime_event(
+        emit_global_runtime_event(
             run_id=run_id,
             stream="lifecycle",
             agent="oracle",
             phase="end",
             cycle_id=cycle_id,
+            symbol=self.symbol_manager.current_symbol,
             data={"status": "ok", "price": current_price}
         )
         return StageResult(payload={
@@ -1980,12 +1914,13 @@ class MultiAgentTradingBot:
         processed_dfs: Dict[str, "pd.DataFrame"]
     ) -> Tuple[Dict[str, Any], PredictResult, Any, Optional[str]]:
         """Run Step 2 parallel analysts and persist analysis context."""
-        self._emit_runtime_event(
+        emit_global_runtime_event(
             run_id=run_id,
             stream="lifecycle",
             agent="analysis_stage",
             phase="start",
-            cycle_id=cycle_id
+            cycle_id=cycle_id,
+            symbol=self.symbol_manager.current_symbol
         )
         try:
             if not (hasattr(self, '_headless_mode') and self._headless_mode):
@@ -2019,21 +1954,23 @@ class MultiAgentTradingBot:
             sent_score = quant_analysis.get('sentiment', {}).get('total_sentiment_score', 0)
             global_state.add_log(f"[👨‍🔬 STRATEGIST] Trend={trend_score:+.0f} | Osc={osc_score:+.0f} | Sent={sent_score:+.0f}")
 
-            self._emit_runtime_event(
+            emit_global_runtime_event(
                 run_id=run_id,
                 stream="lifecycle",
                 agent="analysis_stage",
                 phase="end",
-                cycle_id=cycle_id
+                cycle_id=cycle_id,
+                symbol=self.symbol_manager.current_symbol
             )
             return quant_analysis, predict_result, reflection_result, reflection_text
         except Exception as e:
-            self._emit_runtime_event(
+            emit_global_runtime_event(
                 run_id=run_id,
                 stream="error",
                 agent="analysis_stage",
                 phase="error",
                 cycle_id=cycle_id,
+                symbol=self.symbol_manager.current_symbol,
                 data={"error": str(e)}
             )
             raise
@@ -2049,12 +1986,13 @@ class MultiAgentTradingBot:
         current_price: float
     ) -> Tuple[Dict[str, Any], Dict[str, Any], str]:
         """Run four-layer strategy filtering and return regime/four-layer outputs."""
-        self._emit_runtime_event(
+        emit_global_runtime_event(
             run_id=run_id,
             stream="lifecycle",
             agent="four_layer_filter",
             phase="start",
-            cycle_id=cycle_id
+            cycle_id=cycle_id,
+            symbol=self.symbol_manager.current_symbol
         )
         if not (hasattr(self, '_headless_mode') and self._headless_mode):
             print("[Step 2.75/5] 🎯 Four-Layer Strategy Filter - 多层验证中...")
@@ -2354,12 +2292,13 @@ class MultiAgentTradingBot:
                         log.info("⏭️ Layer 4 SKIP: TriggerDetectorAgent disabled")
 
         global_state.four_layer_result = four_layer_result
-        self._emit_runtime_event(
+        emit_global_runtime_event(
             run_id=run_id,
             stream="lifecycle",
             agent="four_layer_filter",
             phase="end",
             cycle_id=cycle_id,
+            symbol=self.symbol_manager.current_symbol,
             data={
                 "final_action": four_layer_result.get('final_action', 'wait'),
                 "layer4_pass": bool(four_layer_result.get('layer4_pass'))
@@ -2379,12 +2318,13 @@ class MultiAgentTradingBot:
         processed_dfs: Dict[str, "pd.DataFrame"]
     ) -> None:
         """Run semantic agents + multi-period parser after four-layer filtering."""
-        self._emit_runtime_event(
+        emit_global_runtime_event(
             run_id=run_id,
             stream="lifecycle",
             agent="post_filter_stage",
             phase="start",
-            cycle_id=cycle_id
+            cycle_id=cycle_id,
+            symbol=self.symbol_manager.current_symbol
         )
         try:
             await self._run_semantic_analysis(
@@ -2410,20 +2350,22 @@ class MultiAgentTradingBot:
                 log.error(f"❌ Multi-Period Parser Agent failed: {e}")
                 global_state.multi_period_result = {}
 
-            self._emit_runtime_event(
+            emit_global_runtime_event(
                 run_id=run_id,
                 stream="lifecycle",
                 agent="post_filter_stage",
                 phase="end",
-                cycle_id=cycle_id
+                cycle_id=cycle_id,
+                symbol=self.symbol_manager.current_symbol
             )
         except Exception as e:
-            self._emit_runtime_event(
+            emit_global_runtime_event(
                 run_id=run_id,
                 stream="error",
                 agent="post_filter_stage",
                 phase="error",
                 cycle_id=cycle_id,
+                symbol=self.symbol_manager.current_symbol,
                 data={"error": str(e)}
             )
             raise
@@ -2753,12 +2695,13 @@ class MultiAgentTradingBot:
         market_snapshot: Any
     ) -> Dict[str, Any]:
         """Run order execution stage (test/live) with unified lifecycle events."""
-        self._emit_runtime_event(
+        emit_global_runtime_event(
             run_id=run_id,
             stream="lifecycle",
             agent="executor",
             phase="start",
             cycle_id=cycle_id,
+            symbol=self.symbol_manager.current_symbol,
             data={"mode": "test" if self.test_mode else "live"}
         )
 
@@ -2867,12 +2810,13 @@ class MultiAgentTradingBot:
             global_state.cycle_positions_opened += 1
             log.info(f"Positions opened this cycle: {global_state.cycle_positions_opened}/1")
 
-        self._emit_runtime_event(
+        emit_global_runtime_event(
             run_id=run_id,
             stream="lifecycle",
             agent="executor",
             phase="end",
             cycle_id=cycle_id,
+            symbol=self.symbol_manager.current_symbol,
             data={"status": "success", "mode": "test", "action": vote_result.action}
         )
         return {
@@ -2907,12 +2851,13 @@ class MultiAgentTradingBot:
         except Exception as e:
             log.error(f"Live order execution failed: {e}", exc_info=True)
             global_state.add_log(f"[Execution] ❌ Live Order Failed: {e}")
-            self._emit_runtime_event(
+            emit_global_runtime_event(
                 run_id=run_id,
                 stream="error",
                 agent="executor",
                 phase="error",
                 cycle_id=cycle_id,
+                symbol=self.symbol_manager.current_symbol,
                 data={"status": "failed", "mode": "live", "error": str(e)}
             )
             return {
@@ -2973,12 +2918,13 @@ class MultiAgentTradingBot:
                 include_timestamp=False
             )
 
-            self._emit_runtime_event(
+            emit_global_runtime_event(
                 run_id=run_id,
                 stream="lifecycle",
                 agent="executor",
                 phase="end",
                 cycle_id=cycle_id,
+                symbol=self.symbol_manager.current_symbol,
                 data={"status": "success", "mode": "live", "action": vote_result.action}
             )
             return {
@@ -2990,12 +2936,13 @@ class MultiAgentTradingBot:
 
         print("  ❌ 订单执行失败")
         global_state.add_log(f"❌ Order Failed: {order_params['action'].upper()}")
-        self._emit_runtime_event(
+        emit_global_runtime_event(
             run_id=run_id,
             stream="error",
             agent="executor",
             phase="error",
             cycle_id=cycle_id,
+            symbol=self.symbol_manager.current_symbol,
             data={"status": "failed", "mode": "live", "error": "execution_failed"}
         )
         return {
@@ -3171,8 +3118,6 @@ class MultiAgentTradingBot:
 
         return readiness
     
-    
-    
     def _init_accounts(self):
         """
         Initialize trading accounts from config or legacy .env
@@ -3244,12 +3189,13 @@ class MultiAgentTradingBot:
         cycle_num = global_state.cycle_counter
         cycle_id = global_state.current_cycle_id
         run_id = f"{cycle_id}:{self.symbol_manager.current_symbol}" if cycle_id else run_id
-        self._emit_runtime_event(
+        emit_global_runtime_event(
             run_id=run_id,
             stream="lifecycle",
             agent="system",
             phase="start",
             cycle_id=cycle_id,
+            symbol=self.symbol_manager.current_symbol,
             data={"cycle": cycle_num, "symbol": self.symbol_manager.current_symbol}
         )
 
@@ -3265,25 +3211,15 @@ class MultiAgentTradingBot:
             symbol=self.symbol_manager.current_symbol
         )
 
-    def _emit_cycle_pipeline_end(self, *, context: CycleContext, result: Dict[str, Any]) -> None:
-        """Emit cycle_pipeline end event using normalized result payload."""
-        self._emit_runtime_event(
-            run_id=context.run_id,
-            stream="lifecycle",
-            agent="cycle_pipeline",
-            phase="end",
-            cycle_id=context.cycle_id,
-            data={"status": result.get('status'), "action": result.get('action')}
-        )
-
     async def _run_cycle_pipeline(self, *, context: CycleContext, analyze_only: bool) -> Dict[str, Any]:
         """Run the full trading pipeline using a prepared cycle context."""
-        self._emit_runtime_event(
+        emit_global_runtime_event(
             run_id=context.run_id,
             stream="lifecycle",
             agent="cycle_pipeline",
             phase="start",
             cycle_id=context.cycle_id,
+            symbol=self.symbol_manager.current_symbol,
             data={"symbol": context.symbol, "cycle": context.cycle_num}
         )
         try:
@@ -3294,7 +3230,7 @@ class MultiAgentTradingBot:
             )
             if oracle_result.early_result is not None:
                 early = oracle_result.early_result
-                self._emit_cycle_pipeline_end(context=context, result=early)
+                emit_cycle_pipeline_end(context=context, result=early)
                 return early
 
             market_snapshot = oracle_result.payload['market_snapshot']
@@ -3343,7 +3279,7 @@ class MultiAgentTradingBot:
             )
             if decision_result.early_result is not None:
                 early = decision_result.early_result
-                self._emit_cycle_pipeline_end(context=context, result=early)
+                emit_cycle_pipeline_end(context=context, result=early)
                 return early
             vote_result = decision_result.payload['vote_result']
 
@@ -3361,19 +3297,19 @@ class MultiAgentTradingBot:
                 regime_result=regime_result,
                 market_snapshot=market_snapshot
             )
-            self._emit_cycle_pipeline_end(context=context, result=result)
+            emit_cycle_pipeline_end(context=context, result=result)
             return result
         except Exception as e:
-            self._emit_runtime_event(
+            emit_global_runtime_event(
                 run_id=context.run_id,
                 stream="error",
                 agent="cycle_pipeline",
                 phase="error",
                 cycle_id=context.cycle_id,
+                symbol=self.symbol_manager.current_symbol,
                 data={"error": str(e)}
             )
             raise
-
 
     async def run_trading_cycle(self, analyze_only: bool = False) -> Dict:
         """
@@ -3395,12 +3331,13 @@ class MultiAgentTradingBot:
         except Exception as e:
             log.error(f"Trading cycle exception: {e}", exc_info=True)
             global_state.add_log(f"Error: {e}")
-            self._emit_runtime_event(
+            emit_global_runtime_event(
                 run_id=run_id,
                 stream="error",
                 agent="system",
                 phase="error",
                 cycle_id=(cycle_context.cycle_id if cycle_context else global_state.current_cycle_id),
+                symbol=self.symbol_manager.current_symbol,
                 data={"status": "error", "error": str(e)}
             )
             return {
@@ -3975,9 +3912,6 @@ class MultiAgentTradingBot:
 
         return outputs
     
-    
-    
-
     def _build_market_context(
         self,
         quant_analysis: Dict,
@@ -4210,7 +4144,6 @@ class MultiAgentTradingBot:
         return context
 
 # ... locating where vote_result is processed to add semantic analysis
-
 
     def run_once(self) -> Dict:
         """运行一次交易循环（同步包装）"""
@@ -4706,7 +4639,6 @@ class MultiAgentTradingBot:
             wallet=global_state.virtual_balance,
             pnl=real_total_pnl  # ✅ Fix: Pass total profit/loss from start
         )
-
 
     def _save_virtual_state(self):
         """Helper to persist virtual account state"""

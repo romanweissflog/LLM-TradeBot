@@ -5,13 +5,11 @@ from src.server.state import global_state
 
 from src.trading.symbol_manager import SymbolManager
 
-from .runner_provider import RunnerProvider
-
 class ActionPipelineStageRunner:
     def __init__(
         self,
         symbol_manager: SymbolManager,
-        runner_provider: RunnerProvider
+        runner_provider
     ):
         self.symbol_manager = symbol_manager
         self.runner_provider = runner_provider

@@ -9,13 +9,11 @@ from src.agents.predict_result import PredictResult  # ✅ PredictResult Import
 from src.utils.logger import log
 from src.server.state import global_state
 
-from .runner_provider import RunnerProvider
-
 class AgentAnalysisStageRunner:
     def __init__(
         self,
         symbol_manager: SymbolManager,
-        runner_provider: RunnerProvider,
+        runner_provider,
         saver: DataSaver
     ):
         self.symbol_manager = symbol_manager

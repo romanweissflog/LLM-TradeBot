@@ -763,7 +763,7 @@ class MultiAgentTradingBot:
         try:
             cycle_context = self._begin_cycle_context()
             run_id = cycle_context.run_id
-            return await self._run_cycle_pipeline(context=cycle_context, analyze_only=analyze_only)
+            return await self.runner_provider.cycle_pipeline_runner.run(context=cycle_context, analyze_only=analyze_only)
         
         except Exception as e:
             log.error(f"Trading cycle exception: {e}", exc_info=True)
@@ -1120,7 +1120,7 @@ class MultiAgentTradingBot:
     def get_statistics(self) -> Dict:
         """获取统计信息"""
         stats = {
-            'risk_audit': self.risk_audit.get_audit_report(),
+            'risk_audit': self.agent_provider.risk_audit_agent.get_audit_report(),
         }
         # DeepSeek 模式下没有 decision_core
         if hasattr(self, 'strategy_engine'):

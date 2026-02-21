@@ -6,15 +6,11 @@ from src.agents.runtime_events import emit_global_runtime_event, emit_cycle_pipe
 from src.trading.cycle_context import CycleContext
 from src.trading.symbol_manager import SymbolManager
 
-from src.runner import (
-    RunnerProvider
-)
-
 class CyclePipelineRunner:
     def __init__(
         self,
         symbol_manager: SymbolManager,
-        runner_provider: RunnerProvider
+        runner_provider
     ):
         self.symbol_manager = symbol_manager
         self.runner_provider = runner_provider

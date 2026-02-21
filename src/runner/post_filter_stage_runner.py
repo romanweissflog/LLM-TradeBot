@@ -1,7 +1,5 @@
 from typing import Dict, Optional, Any
 
-from src.agents.agent_config import AgentConfig
-from src.config import Config
 from src.agents.runtime_events import emit_global_runtime_event
 from src.agents.agent_provider import AgentProvider
 
@@ -10,34 +8,16 @@ from src.server.state import global_state
 
 from src.trading.symbol_manager import SymbolManager
 
-from src.runner import (
-    SemanticAnalysisRunner
-)
-
-from src.agents import (
-    MultiPeriodParserAgent
-)
-
 class PostFilterStageRunner:
     def __init__(
         self,
-        config: Config,
-        agent_config: AgentConfig,
         symbol_manager: SymbolManager,
-        agent_provider: AgentProvider
+        agent_provider: AgentProvider,
+        runner_provider
     ):
         self.symbol_manager = symbol_manager
-        
-        self.multi_period_agent = MultiPeriodParserAgent()
-        
-        self.semantic_analysis_runner = SemanticAnalysisRunner(
-            config,
-            agent_config,
-            symbol_manager,
-            agent_provider.trend_agent,
-            agent_provider.setup_agent,
-            agent_provider.trigger_agent
-        )
+        self.agent_provider = agent_provider  
+        self.runner_provider = runner_provider
 
     async def run(
         self,
@@ -60,7 +40,7 @@ class PostFilterStageRunner:
             symbol=self.symbol_manager.current_symbol
         )
         try:
-            await self.semantic_analysis_runner.run(
+            await self.runner_provider.semantic_analysis_runner.run(
                 run_id=run_id,
                 cycle_id=cycle_id,
                 current_price=current_price,
@@ -70,7 +50,7 @@ class PostFilterStageRunner:
             )
 
             try:
-                multi_period_result = self.multi_period_agent.analyze(
+                multi_period_result = self.agent_provider.multi_period_agent.analyze(
                     quant_analysis=quant_analysis,
                     four_layer_result=four_layer_result,
                     semantic_analyses=getattr(global_state, 'semantic_analyses', {}) or {}

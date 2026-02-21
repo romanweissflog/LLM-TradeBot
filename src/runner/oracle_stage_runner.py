@@ -5,6 +5,7 @@ from typing import Dict, Optional, List, Any
 
 from src.config import Config
 from src.agents.agent_config import AgentConfig
+from src.agents.agent_provider import AgentProvider
 from src.data.processor import MarketDataProcessor  # ✅ Corrected Import
 
 from src.api.binance_client import BinanceClient
@@ -26,6 +27,7 @@ class OracleStageRunner:
         agent_config: AgentConfig,
         client: BinanceClient,
         symbol_manager: SymbolManager,
+        agent_provider: AgentProvider,
         saver: DataSaver,
         kline_limit: int,
         test_mode: bool
@@ -34,6 +36,7 @@ class OracleStageRunner:
         self.agent_config = agent_config
         self.client = client
         self.symbol_manager = symbol_manager
+        self.agent_provider = agent_provider
         self.saver = saver
         self.kline_limit = kline_limit
         self.test_mode = test_mode
@@ -42,7 +45,7 @@ class OracleStageRunner:
         self.processor = MarketDataProcessor()  # ✅ 初始化数据处理器
         print("[DEBUG] MarketDataProcessor created")
 
-    async def _run_oracle_stage(
+    async def run(
         self,
         *,
         run_id: str,
@@ -64,7 +67,7 @@ class OracleStageRunner:
         data_sync_timeout = get_agent_timeout(self.config, self.agent_config, 'data_sync', 200.0)
         try:
             market_snapshot = await asyncio.wait_for(
-                self.data_sync_agent.fetch_all_timeframes(
+                self.agent_provider.data_sync_agent.fetch_all_timeframes(
                     self.symbol_manager.current_symbol,
                     limit=self.kline_limit
                 ),

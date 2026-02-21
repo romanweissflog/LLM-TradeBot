@@ -8,19 +8,17 @@ from src.agents.agent_provider import AgentProvider
 
 from src.trading.symbol_manager import SymbolManager
 
-from src.runner import (
-    ActionPipelineStageRunner,
-    AgentAnalysisStageRunner,
-    CyclePipelineRunner,
-    DecisionStageRunner,
-    ExecutionStageRunner,
-    OracleStageRunner,
-    ParallelAnalysisRunner,
-    PostFilterStageRunner,
-    RiskAuditStageRunner,
-    SemanticAnalysisRunner,
-    FourLayerFilterStageRunner
-)
+from .action_pipeline_stage_runner import ActionPipelineStageRunner
+from .agent_analysis_stage_runner import AgentAnalysisStageRunner
+from .cycle_pipeline_runner import CyclePipelineRunner
+from .decision_stage_runner import DecisionStageRunner
+from .execution_stage_runner import ExecutionStageRunner
+from .oracle_stage_runner import OracleStageRunner
+from .parallel_analysis_runner import ParallelAnalysisRunner
+from .post_filter_stage_runner import PostFilterStageRunner
+from .risk_audit_stage_runner import RiskAuditStageRunner
+from .semantic_analysis_runner import SemanticAnalysisRunner
+from .four_layer_filter_stage_runner import FourLayerFilterStageRunner
 
 class RunnerProvider:
     def __init__(
@@ -80,6 +78,7 @@ class RunnerProvider:
             agent_config,
             client,
             symbol_manager,
+            agent_provider,
             saver,
             kline_limit,
             test_mode
@@ -94,10 +93,9 @@ class RunnerProvider:
         )
 
         self.post_filter_stage_runner = PostFilterStageRunner(
-            config,
-            agent_config,
             symbol_manager,
-            agent_provider
+            agent_provider,
+            self
         )
 
         self.risk_audit_stage_runner = RiskAuditStageRunner(

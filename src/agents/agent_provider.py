@@ -5,32 +5,23 @@ from .predict_agents_provider import PredictAgentsProvider
 from src.api.binance_client import BinanceClient
 from src.trading.symbol_manager import SymbolManager
 
-from src.agents import (
-    RiskAuditAgent,
-    QuantAnalystAgent,
-    RegimeDetector,
-    DataSyncAgent
-)
+from .risk_audit_agent import RiskAuditAgent
+from .quant_analyst_agent import QuantAnalystAgent
+from .regime_detector_agent import RegimeDetector
+from .data_sync_agent import DataSyncAgent
+from .multi_period_agent import MultiPeriodParserAgent
 
-from src.agents.reflection import (
-    ReflectionAgentLLM,
-    ReflectionAgentNoLLM
-)
+from .reflection.reflection_agent_llm import ReflectionAgentLLM
+from .reflection.reflection_agent_no_llm import ReflectionAgentNoLLM
 
-from src.agents.trend import (
-    TrendAgentLLM,
-    TrendAgentNoLLM
-)
+from .trend.trend_agent_llm import TrendAgentLLM
+from .trend.trend_agent_no_llm import TrendAgentNoLLM
 
-from src.agents.setup import (
-    SetupAgentLLM,
-    SetupAgentNoLLM
-)
+from .setup.setup_agent_llm import SetupAgentLLM
+from .setup.setup_agent_no_llm import SetupAgentNoLLM
 
-from src.agents.trigger import (
-    TriggerAgentLLM,
-    TriggerAgentNoLLM
-)
+from .trigger.trigger_agent_llm import TriggerAgentLLM
+from .trigger.trigger_agent_no_llm import TriggerAgentNoLLM
 
 class AgentProvider:
     def __init__(
@@ -54,10 +45,13 @@ class AgentProvider:
             max_stop_loss_pct=0.05
         )
         self.quant_analyst_agent = QuantAnalystAgent()
+        
+        self.multi_period_agent = MultiPeriodParserAgent()
           
         print("  ✅ DataSyncAgent ready")
         print("  ✅ QuantAnalystAgent ready")
         print("  ✅ RiskAuditAgent ready")
+        print("  ✅ MultiPeriodParserAgent ready")
 
     def reload(
         self,
@@ -78,7 +72,7 @@ class AgentProvider:
         self._set_trend_agent()
         self._set_setup_agent()
         self._set_trigger_agent()
-        self._set_regime_director_agent()
+        self._set_regime_detector_agent()
 
     def _set_predict_agents_provider(self):
         # 🆕 Optional Agent: PredictAgent (per symbol)
@@ -142,11 +136,11 @@ class AgentProvider:
             print("  ⏭️ TriggerAgent disabled")
             self.trigger_agent = None
 
-    def _set_regime_director_agent(self):
-        # 🆕 Optional Agent: RegimeDirectorAgent
-        if self.agent_config.regime_director_agent:
-            if not hasattr(self, 'regime_director_agent'):
-                self.regime_director_agent = RegimeDetector()
+    def _set_regime_detector_agent(self):
+        # 🆕 Optional Agent: RegimeDetector
+        if self.agent_config.regime_detector_agent:
+            if not hasattr(self, 'regime_detector_agent'):
+                self.regime_detector_agent = RegimeDetector()
         else:
-            print("  ⏭️ RegimeDirectorAgent disabled")
-            self.regime_director_agent = None
+            print("  ⏭️ RegimeDetectorAgent disabled")
+            self.regime_detector_agent = None

@@ -8,9 +8,7 @@ from src.agents.agent_config import AgentConfig
 from src.agents.agent_provider import AgentProvider
 
 from src.utils.data_saver import DataSaver
-from src.agents.reflection import (
-    ReflectionResult
-)
+from src.agents.reflection.reflection_result import ReflectionResult
 
 from src.trading.symbol_manager import SymbolManager
 from src.agents.predict_result import PredictResult

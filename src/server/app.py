@@ -18,6 +18,7 @@ from pydantic import BaseModel
 class ControlCommand(BaseModel):
     action: str  # start, pause, stop, restart, set_interval
     interval: float = None  # Optional: interval in minutes for set_interval action
+    mode: Optional[str] = None  # Optional: test/live (runtime switch currently unsupported)
 
 class LoginRequest(BaseModel):
     password: str
@@ -405,6 +406,19 @@ async def control_bot(cmd: ControlCommand, authenticated: bool = Depends(verify_
             return {"status": "success", "interval": cmd.interval}
         else:
             raise HTTPException(status_code=400, detail="Invalid interval. Must be 0.5, 1, 3, 5, 15, 30, or 60 minutes.")
+    elif action == "set_mode":
+        target_mode = (cmd.mode or "").strip().lower()
+        if target_mode not in {"test", "live"}:
+            raise HTTPException(status_code=400, detail="Invalid mode. Must be 'test' or 'live'.")
+
+        current_mode = "test" if global_state.is_test_mode else "live"
+        if target_mode == current_mode:
+            return {"status": "success", "mode": current_mode}
+
+        raise HTTPException(
+            status_code=409,
+            detail="Runtime mode switching is not supported. Restart with --live (or RUN_MODE=live) to use real wallet balance and live trading."
+        )
     else:
         raise HTTPException(status_code=400, detail="Invalid action")
     

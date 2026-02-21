@@ -18,6 +18,7 @@ window.currentLang = localStorage.getItem('language') || 'en';
 
 // 🎯 Demo Mode Tracking (moved to top to avoid TDZ error)
 let demoExpiredShown = false;
+window.backendIsTestMode = true;
 
 // Apply translations to elements with data-i18n attribute
 function applyTranslations(lang) {
@@ -1438,6 +1439,8 @@ function renderSystemStatus(system) {
     // Update Environment Indicator (Test Mode / Live Trading)
     const envEl = document.getElementById('sys-env');
     if (envEl && system.is_test_mode !== undefined) {
+        window.backendIsTestMode = Boolean(system.is_test_mode);
+        syncTradingModeButtons(window.backendIsTestMode);
         if (system.is_test_mode) {
             envEl.textContent = '🧪 TEST';
             envEl.className = 'value badge warning'; // Yellow for test
@@ -4333,6 +4336,16 @@ function renderTradeHistory(trades) {
 // ========================================
 // Test/Live Mode Toggle
 // ========================================
+function syncTradingModeButtons(isTestMode) {
+    const btnTest = document.getElementById('btn-mode-test');
+    const btnLive = document.getElementById('btn-mode-live');
+    if (!btnTest || !btnLive) return;
+
+    window.tradingMode = isTestMode ? 'test' : 'live';
+    btnTest.classList.toggle('active', isTestMode);
+    btnLive.classList.toggle('active', !isTestMode);
+}
+
 (function () {
     const btnTest = document.getElementById('btn-mode-test');
     const btnLive = document.getElementById('btn-mode-live');
@@ -4342,21 +4355,32 @@ function renderTradeHistory(trades) {
     // Current mode state
     window.tradingMode = 'test'; // Default to test
 
+    const requestModeSwitch = async (mode) => {
+        try {
+            const response = await apiFetch('/api/control', {
+                method: 'POST',
+                body: JSON.stringify({ action: 'set_mode', mode })
+            });
+            const payload = await response.json().catch(() => ({}));
+
+            if (!response.ok || payload.status !== 'success') {
+                throw new Error(payload.detail || `Mode switch failed (HTTP ${response.status})`);
+            }
+
+            syncTradingModeButtons(mode === 'test');
+            console.log(`Mode unchanged on backend: ${mode.toUpperCase()}`);
+        } catch (err) {
+            console.error('Mode switch failed:', err);
+            syncTradingModeButtons(Boolean(window.backendIsTestMode));
+            alert(err.message || 'Mode switch failed. Please restart in the desired mode.');
+        }
+    };
+
     // Test mode click
     btnTest.addEventListener('click', function () {
         if (window.tradingMode === 'test') return;
 
-        window.tradingMode = 'test';
-        btnTest.classList.add('active');
-        btnLive.classList.remove('active');
-
-        // Send to backend
-        apiFetch('/api/control', {
-            method: 'POST',
-            body: JSON.stringify({ action: 'set_mode', mode: 'test' })
-        }).then(() => {
-            console.log('🧪 Switched to TEST mode');
-        }).catch(err => console.error('Mode switch failed:', err));
+        requestModeSwitch('test');
     });
 
     // Live mode click
@@ -4384,20 +4408,10 @@ function renderTradeHistory(trades) {
             if (tradingTab) tradingTab.click();
         }
 
-        // Update UI
-        window.tradingMode = 'live';
-        btnLive.classList.add('active');
-        btnTest.classList.remove('active');
-
-        // Send to backend
-        apiFetch('/api/control', {
-            method: 'POST',
-            body: JSON.stringify({ action: 'set_mode', mode: 'live' })
-        }).then(() => {
-            console.log('💰 Switched to LIVE mode');
-        }).catch(err => console.error('Mode switch failed:', err));
+        requestModeSwitch('live');
     });
 
+    syncTradingModeButtons(Boolean(window.backendIsTestMode));
     console.log('✅ Mode toggle initialized');
 })();
 

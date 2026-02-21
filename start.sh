@@ -64,18 +64,22 @@ fi
 print_success "Environment variables OK"
 
 # Parse arguments
-TEST_MODE=""
-RUN_MODE=""
+MODE_OVERRIDE=""
+RUN_MODE_ARG=""
 EXTRA_ARGS=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
         --test)
-            TEST_MODE="--test"
+            MODE_OVERRIDE="test"
+            shift
+            ;;
+        --live)
+            MODE_OVERRIDE="live"
             shift
             ;;
         --mode)
-            RUN_MODE="--mode $2"
+            RUN_MODE_ARG="--mode $2"
             shift 2
             ;;
         *)
@@ -85,22 +89,37 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Default to test mode with continuous
-if [ -z "$TEST_MODE" ]; then
+# Determine test/live mode
+TEST_MODE=""
+if [ "$MODE_OVERRIDE" = "test" ]; then
     TEST_MODE="--test"
+elif [ "$MODE_OVERRIDE" = "live" ]; then
+    TEST_MODE=""
+else
+    ENV_RUN_MODE=$(echo "${RUN_MODE:-test}" | tr '[:upper:]' '[:lower:]')
+    if [ "$ENV_RUN_MODE" = "live" ]; then
+        TEST_MODE=""
+    else
+        TEST_MODE="--test"
+    fi
 fi
 
-if [ -z "$RUN_MODE" ]; then
-    RUN_MODE="--mode continuous"
+if [ -z "$RUN_MODE_ARG" ]; then
+    RUN_MODE_ARG="--mode continuous"
 fi
 
 # Start the application
 echo ""
 print_info "Starting LLM-TradeBot..."
-print_info "Mode: $TEST_MODE $RUN_MODE"
+if [ -n "$TEST_MODE" ]; then
+    print_info "Environment: TEST"
+else
+    print_info "Environment: LIVE"
+fi
+print_info "Run Mode: $RUN_MODE_ARG"
 echo ""
 print_success "Dashboard will be available at: http://localhost:8000"
 echo ""
 
 # Run main.py
-python main.py $TEST_MODE $RUN_MODE $EXTRA_ARGS
+python main.py $TEST_MODE $RUN_MODE_ARG $EXTRA_ARGS

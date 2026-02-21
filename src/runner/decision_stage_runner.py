@@ -1,0 +1,696 @@
+import asyncio
+from typing import Dict, Optional, Any, Tuple
+
+from dataclasses import asdict
+
+from src.strategy.llm_engine import StrategyEngine
+from src.agents.agent_config import AgentConfig
+from src.agents.decision_core_agent import VoteResult, DecisionCoreAgent
+from src.utils.semantic_converter import SemanticConverter  # ✅ Global Import
+
+from src.agents.runtime_events import emit_global_runtime_event
+from src.utils.task_util import run_task_with_timeout
+
+from src.trading.symbol_manager import SymbolManager
+from src.agents.predict_result import PredictResult  # ✅ PredictResult Import
+from src.utils.logger import log
+from src.server.state import global_state
+
+from src.utils.action_protocol import (
+    normalize_action
+)
+
+class DecisionStageRunner:
+    def __init__(
+        self,
+        agent_config: AgentConfig,
+        symbol_manager: SymbolManager,
+        strategy_engine: StrategyEngine,
+        max_position_size: float = 100.0,
+    ):
+        self.agent_config = agent_config
+        self.symbol_manager = symbol_manager
+        self.max_position_size = max_position_size
+        self.strategy_engine = strategy_engine
+        
+        self.decision_core = DecisionCoreAgent()
+    
+    async def _run_decision_stage(
+        self,
+        *,
+        run_id: str,
+        cycle_id: Optional[str],
+        processed_dfs: Dict[str, "pd.DataFrame"],
+        quant_analysis: Dict[str, Any],
+        predict_result: PredictResult,
+        reflection_text: Optional[str],
+        current_price: float,
+        current_position_info: Optional[Dict[str, Any]],
+        regime_result: Optional[Dict[str, Any]]
+    ) -> Tuple[Dict[str, Any], str, Optional[Dict[str, Any]], Any, Dict[str, Any]]:
+        """
+        Build final decision payload (forced-exit/fast/LLM/rule) and convert to VoteResult.
+        """
+        emit_global_runtime_event(
+            run_id=run_id,
+            stream="lifecycle",
+            agent="decision_router",
+            phase="start",
+            cycle_id=cycle_id,
+            symbol=self.symbol_manager.current_symbol
+        )
+
+        selected_agent_outputs = self._collect_selected_agent_outputs(
+            predict_result=predict_result,
+            reflection_text=reflection_text
+        )
+        if isinstance(quant_analysis, dict):
+            quant_analysis['agent_outputs'] = selected_agent_outputs
+
+        market_data = {
+            'df_5m': processed_dfs['5m'],
+            'df_15m': processed_dfs['15m'],
+            'df_1h': processed_dfs['1h'],
+            'current_price': current_price
+        }
+        regime_info = quant_analysis.get('regime', {})
+
+        fast_signal = None
+        decision_source = 'llm'
+        forced_exit = self._check_forced_exit(current_position_info)
+        llm_enabled = self._is_llm_enabled()
+        if llm_enabled and getattr(self.strategy_engine, 'disable_llm', False):
+            llm_enabled = bool(self.strategy_engine.reload_config())
+
+        if forced_exit:
+            decision_source = 'forced_exit'
+            decision_payload = forced_exit
+            global_state.add_log(f"[🧯 FORCED EXIT] {forced_exit.get('reasoning', 'Forced close')}")
+            try:
+                conf_val = float(decision_payload.get('confidence', 0) or 0)
+            except (TypeError, ValueError):
+                conf_val = 0.0
+            global_state.add_agent_message(
+                "decision_core",
+                f"Action: {decision_payload.get('action', '').upper()} | Conf: {conf_val:.1f}% | Reason: {decision_payload.get('reasoning', '')} | Source: FORCED",
+                level="warning"
+            )
+        else:
+            fast_signal = self._detect_fast_trend_signal(processed_dfs.get('5m'))
+
+        if fast_signal:
+            decision_source = 'fast_trend'
+            change_pct = fast_signal['change_pct']
+            volume_ratio = fast_signal['volume_ratio']
+            fast_action = fast_signal['action']
+            fast_confidence = fast_signal['confidence']
+            fast_reason = f"30m trend {change_pct:+.2f}% | RVOL {volume_ratio:.2f}x"
+
+            global_state.add_log(f"[⚡ FAST] {fast_action.upper()} | {fast_reason}")
+
+            if fast_action == 'open_long':
+                bull_conf = fast_confidence
+                bear_conf = max(0.0, 100.0 - fast_confidence)
+                bull_stance = 'FAST_UP'
+                bear_stance = 'HEDGE'
+                bull_reason = fast_reason
+                bear_reason = 'Short bias weak vs momentum'
+            else:
+                bull_conf = max(0.0, 100.0 - fast_confidence)
+                bear_conf = fast_confidence
+                bull_stance = 'HEDGE'
+                bear_stance = 'FAST_DN'
+                bull_reason = 'Long bias weak vs momentum'
+                bear_reason = fast_reason
+
+            decision_payload = {
+                'action': fast_action,
+                'confidence': fast_confidence,
+                'position_size_pct': min(100.0, max(10.0, fast_confidence)),
+                'reasoning': fast_reason,
+                'bull_perspective': {
+                    'bull_confidence': bull_conf,
+                    'stance': bull_stance,
+                    'bullish_reasons': bull_reason
+                },
+                'bear_perspective': {
+                    'bear_confidence': bear_conf,
+                    'stance': bear_stance,
+                    'bearish_reasons': bear_reason
+                }
+            }
+            try:
+                conf_val = float(decision_payload.get('confidence', 0) or 0)
+            except (TypeError, ValueError):
+                conf_val = 0.0
+            global_state.add_agent_message(
+                "decision_core",
+                f"Action: {decision_payload.get('action').upper()} | Conf: {conf_val:.1f}% | Reason: {decision_payload.get('reasoning')[:100]}... | Source: FAST",
+                level="info"
+            )
+        elif not forced_exit:
+            if llm_enabled:
+                global_state.add_agent_message("decision_core", "🧠 DeepSeek LLM is weighing options...", level="info")
+
+                market_context_text = self._build_market_context(
+                    quant_analysis=quant_analysis,
+                    predict_result=predict_result,
+                    market_data=market_data,
+                    regime_info=regime_info,
+                    position_info=current_position_info,
+                    selected_agent_outputs=selected_agent_outputs
+                )
+
+                market_context_data = {
+                    'symbol': self.symbol_manager.current_symbol,
+                    'timestamp': datetime.now().isoformat(),
+                    'current_price': current_price,
+                    'position_side': (current_position_info or {}).get('side')
+                }
+
+                log.info("🐂🐻 Gathering Bull/Bear perspectives in PARALLEL...")
+                llm_perspective_timeout = self._get_agent_timeout('llm_perspective', 45.0)
+                loop = asyncio.get_running_loop()
+                bull_p, bear_p = await asyncio.gather(
+                    run_task_with_timeout(
+                        run_id=run_id,
+                        cycle_id=cycle_id,
+                        agent_name="bull_agent",
+                        timeout_seconds=llm_perspective_timeout,
+                        task_factory=lambda: loop.run_in_executor(
+                            None, self.strategy_engine.get_bull_perspective, market_context_text
+                        ),
+                        symbol=self.symbol_manager.current_symbol,
+                        fallback={
+                            "stance": "NEUTRAL",
+                            "bullish_reasons": "Perspective timeout",
+                            "bull_confidence": 50
+                        }
+                    ),
+                    run_task_with_timeout(
+                        run_id=run_id,
+                        cycle_id=cycle_id,
+                        agent_name="bear_agent",
+                        timeout_seconds=llm_perspective_timeout,
+                        task_factory=lambda: loop.run_in_executor(
+                            None, self.strategy_engine.get_bear_perspective, market_context_text
+                        ),
+                        symbol=self.symbol_manager.current_symbol,
+                        fallback={
+                            "stance": "NEUTRAL",
+                            "bearish_reasons": "Perspective timeout",
+                            "bear_confidence": 50
+                        }
+                    )
+                )
+
+                bull_summary = bull_p.get('bullish_reasons', 'No reasons provided')
+                bear_summary = bear_p.get('bearish_reasons', 'No reasons provided')
+                global_state.add_agent_message("bull_agent", f"Stance: {bull_p.get('stance')} | Reason: {bull_summary}", level="success")
+                global_state.add_agent_message("bear_agent", f"Stance: {bear_p.get('stance')} | Reason: {bear_summary}", level="warning")
+
+                decision_payload = self.strategy_engine.make_decision(
+                    market_context_text=market_context_text,
+                    market_context_data=market_context_data,
+                    reflection=reflection_text,
+                    bull_perspective=bull_p,
+                    bear_perspective=bear_p
+                )
+
+                try:
+                    conf_val = float(decision_payload.get('confidence', 0) or 0)
+                except (TypeError, ValueError):
+                    conf_val = 0.0
+                global_state.add_agent_message(
+                    "decision_core",
+                    f"Action: {decision_payload.get('action').upper()} | Conf: {conf_val:.1f}% | Reason: {decision_payload.get('reasoning')}",
+                    level="info"
+                )
+            else:
+                global_state.add_agent_message("decision_core", "⚖️ Running rule-based decision logic...", level="info")
+                decision_source = 'decision_core'
+                vote_core = await self.decision_core.make_decision(
+                    quant_analysis=quant_analysis,
+                    predict_result=predict_result,
+                    market_data=market_data
+                )
+                size_pct = 0.0
+                if vote_core.trade_params and self.max_position_size:
+                    size_pct = min(
+                        100.0,
+                        max(5.0, (vote_core.trade_params.get('position_size', 0) / self.max_position_size) * 100)
+                    )
+                decision_payload = {
+                    'action': vote_core.action,
+                    'confidence': vote_core.confidence,
+                    'position_size_pct': size_pct,
+                    'reasoning': vote_core.reason,
+                    'bull_perspective': {
+                        'bull_confidence': 50,
+                        'stance': 'NEUTRAL',
+                        'bullish_reasons': 'LLM disabled'
+                    },
+                    'bear_perspective': {
+                        'bear_confidence': 50,
+                        'stance': 'NEUTRAL',
+                        'bearish_reasons': 'LLM disabled'
+                    }
+                }
+                try:
+                    conf_val = float(decision_payload.get('confidence', 0) or 0)
+                except (TypeError, ValueError):
+                    conf_val = 0.0
+                global_state.add_agent_message(
+                    "decision_core",
+                    f"Action: {decision_payload.get('action').upper()} | Conf: {conf_val:.1f}% | Reason: {decision_payload.get('reasoning')} | Source: RULE",
+                    level="info"
+                )
+
+        if 'bull_perspective' not in decision_payload:
+            decision_payload['bull_perspective'] = {
+                'bull_confidence': 50,
+                'stance': 'NEUTRAL',
+                'bullish_reasons': 'N/A'
+            }
+        if 'bear_perspective' not in decision_payload:
+            decision_payload['bear_perspective'] = {
+                'bear_confidence': 50,
+                'stance': 'NEUTRAL',
+                'bearish_reasons': 'N/A'
+            }
+        decision_payload['action'] = normalize_action(
+            decision_payload.get('action'),
+            position_side=(current_position_info or {}).get('side')
+        )
+
+        q_trend = quant_analysis.get('trend', {})
+        q_osc = quant_analysis.get('oscillator', {})
+        q_sent = quant_analysis.get('sentiment', {})
+        q_comp = quant_analysis.get('comprehensive', {})
+
+        vote_details = {
+            'deepseek': decision_payload.get('confidence', 0),
+            'strategist_total': q_comp.get('score', 0),
+            'trend_1h': q_trend.get('trend_1h_score', 0),
+            'trend_15m': q_trend.get('trend_15m_score', 0),
+            'trend_5m': q_trend.get('trend_5m_score', 0),
+            'oscillator_1h': q_osc.get('osc_1h_score', 0),
+            'oscillator_15m': q_osc.get('osc_15m_score', 0),
+            'oscillator_5m': q_osc.get('osc_5m_score', 0),
+            'sentiment': q_sent.get('total_sentiment_score', 0),
+            'prophet': predict_result.probability_up if predict_result else 0.5,
+            'bull_confidence': decision_payload.get('bull_perspective', {}).get('bull_confidence', 50),
+            'bear_confidence': decision_payload.get('bear_perspective', {}).get('bear_confidence', 50),
+            'bull_stance': decision_payload.get('bull_perspective', {}).get('stance', 'UNKNOWN'),
+            'bear_stance': decision_payload.get('bear_perspective', {}).get('stance', 'UNKNOWN'),
+            'bull_reasons': decision_payload.get('bull_perspective', {}).get('bullish_reasons', ''),
+            'bear_reasons': decision_payload.get('bear_perspective', {}).get('bearish_reasons', '')
+        }
+
+        if fast_signal:
+            vote_details['fast_trend_change_pct'] = fast_signal.get('change_pct')
+            vote_details['fast_trend_volume_ratio'] = fast_signal.get('volume_ratio')
+            vote_details['fast_trend_window'] = fast_signal.get('window_minutes')
+
+        trend_score_total = quant_analysis.get('trend', {}).get('total_trend_score', 0)
+        regime_desc = SemanticConverter.get_trend_semantic(trend_score_total)
+
+        pos_pct = decision_payload.get('position_size_pct', 0)
+        if not pos_pct and decision_payload.get('position_size_usd') and self.max_position_size:
+            pos_pct = (decision_payload.get('position_size_usd') / self.max_position_size) * 100
+            pos_pct = min(pos_pct, 100)
+
+        price_position_info = regime_result.get('position', {}) if regime_result else {}
+
+        vote_result = VoteResult(
+            action=decision_payload.get('action', 'wait'),
+            confidence=decision_payload.get('confidence', 0),
+            weighted_score=decision_payload.get('confidence', 0) - 50,
+            vote_details=vote_details,
+            multi_period_aligned=True,
+            reason=decision_payload.get('reasoning', 'DeepSeek LLM decision'),
+            regime={
+                'regime': regime_desc,
+                'confidence': decision_payload.get('confidence', 0)
+            },
+            position=price_position_info
+        )
+
+        emit_global_runtime_event(
+            run_id=run_id,
+            stream="lifecycle",
+            agent="decision_router",
+            phase="end",
+            cycle_id=cycle_id,
+            symbol=self.symbol_manager.current_symbol,
+            data={
+                "action": vote_result.action,
+                "confidence": vote_result.confidence,
+                "source": decision_source
+            }
+        )
+
+        return decision_payload, decision_source, fast_signal, vote_result, selected_agent_outputs
+
+    
+    def _collect_selected_agent_outputs(
+        self,
+        predict_result: PredictResult = None,
+        reflection_text: Optional[str] = None
+    ) -> Dict[str, Any]:
+        outputs: Dict[str, Any] = {}
+
+        if getattr(self.agent_config, 'symbol_selector_agent', False):
+            if getattr(global_state, 'symbol_selector', None):
+                outputs['symbol_selector'] = global_state.symbol_selector
+
+        if getattr(self.agent_config, 'predict_agent', False) and predict_result:
+            try:
+                outputs['predict_agent'] = asdict(predict_result)
+            except Exception:
+                outputs['predict_agent'] = getattr(predict_result, '__dict__', str(predict_result))
+
+        semantic = getattr(global_state, 'semantic_analyses', {}) or {}
+
+        if self.agent_config.trend_agent_llm or self.agent_config.trend_agent_local:
+            if 'trend' in semantic:
+                outputs['trend_agent'] = semantic.get('trend')
+        if self.agent_config.setup_agent_llm or self.agent_config.setup_agent_local:
+            if 'setup' in semantic:
+                outputs['setup_agent'] = semantic.get('setup')
+        if self.agent_config.trigger_agent_llm or self.agent_config.trigger_agent_local:
+            if 'trigger' in semantic:
+                outputs['trigger_agent'] = semantic.get('trigger')
+
+        if self.agent_config.reflection_agent_llm or self.agent_config.reflection_agent_local:
+            outputs['reflection_agent'] = {
+                'count': getattr(global_state, 'reflection_count', 0),
+                'text': reflection_text,
+                'raw': getattr(global_state, 'last_reflection', None)
+            }
+
+        multi_period = getattr(global_state, 'multi_period_result', {}) or {}
+        if multi_period:
+            outputs['multi_period_agent'] = multi_period
+
+        return outputs
+
+    def _is_llm_enabled(self) -> bool:
+        """Return True if LLM-driven agents are enabled by runtime config."""
+        return bool(
+            self.agent_config.trend_agent_llm
+            or self.agent_config.setup_agent_llm
+            or self.agent_config.trigger_agent_llm
+            or self.agent_config.reflection_agent_llm
+        )
+
+    def _detect_fast_trend_signal(
+        self,
+        df_5m: Optional["pd.DataFrame"],
+        window_minutes: int = 30,
+        threshold_pct: float = 0.8,
+        volume_ratio_threshold: float = 1.2
+    ) -> Optional[Dict]:
+        """Detect short-term momentum over the last 30m and return a fast entry signal."""
+        if df_5m is None or df_5m.empty:
+            return None
+        if 'close' not in df_5m.columns or 'volume' not in df_5m.columns:
+            return None
+
+        window_bars = max(2, int(window_minutes / 5))
+        if len(df_5m) < window_bars * 2:
+            return None
+
+        recent = df_5m.iloc[-window_bars:]
+        previous = df_5m.iloc[-window_bars * 2:-window_bars]
+        first_close = float(recent['close'].iloc[0])
+        last_close = float(recent['close'].iloc[-1])
+        if first_close <= 0:
+            return None
+
+        change_pct = ((last_close - first_close) / first_close) * 100.0
+        recent_volume = float(recent['volume'].sum())
+        prev_volume = float(previous['volume'].sum()) if not previous.empty else 0.0
+        volume_ratio = (recent_volume / prev_volume) if prev_volume > 0 else 1.0
+
+        if change_pct >= threshold_pct and volume_ratio >= volume_ratio_threshold:
+            action = 'open_long'
+        elif change_pct <= -threshold_pct and volume_ratio >= volume_ratio_threshold:
+            action = 'open_short'
+        else:
+            return None
+
+        change_over = max(0.0, abs(change_pct) - threshold_pct)
+        change_boost = min(15.0, change_over * 5.0)
+        vol_over = max(0.0, volume_ratio - volume_ratio_threshold)
+        vol_boost = min(10.0, vol_over * 10.0)
+        confidence = min(92.0, 70.0 + change_boost + vol_boost)
+
+        return {
+            'action': action,
+            'change_pct': change_pct,
+            'volume_ratio': volume_ratio,
+            'confidence': confidence,
+            'window_minutes': window_minutes
+        }
+
+    def _build_market_context(
+        self,
+        quant_analysis: Dict,
+        predict_result,
+        market_data: Dict,
+        regime_info: Dict = None,
+        position_info: Dict = None,
+        selected_agent_outputs: Optional[Dict] = None
+    ) -> str:
+        """
+        构建 DeepSeek LLM 所需的市场上下文文本
+        """
+        # 提取关键数据
+        current_price = market_data['current_price']
+        
+        # 格式化趋势分析
+        trend = quant_analysis.get('trend', {})
+        trend_details = trend.get('details', {})
+        
+        oscillator = quant_analysis.get('oscillator', {})
+        
+        sentiment = quant_analysis.get('sentiment', {})
+        
+        # Prophet 预测 (语义化转换)
+        prob_pct = (predict_result.probability_up if predict_result else 0.5) * 100
+        prophet_signal = predict_result.signal if predict_result else "neutral"
+        
+        # 语义转换逻辑 (Prophet)
+        if prob_pct >= 80:
+            prediction_desc = f"Strong Uptrend Forecast (High Probability of Rising > 80%, Value: {prob_pct:.1f}%)"
+        elif prob_pct >= 60:
+            prediction_desc = f"Bullish Bias (Likely to Rise 60-80%, Value: {prob_pct:.1f}%)"
+        elif prob_pct <= 20:
+            prediction_desc = f"Strong Downtrend Forecast (High Probability of Falling > 80%, Value: {prob_pct:.1f}%)"
+        elif prob_pct <= 40:
+            prediction_desc = f"Bearish Bias (Likely to Fall 60-80%, Value: {prob_pct:.1f}%)"
+        else:
+            prediction_desc = f"Uncertain/Neutral (40-60%, Value: {prob_pct:.1f}%)"
+
+        # 语义化转换 (Technical Indicators)
+        t_score_total = trend.get('total_trend_score')  # Default to None
+        t_semantic = SemanticConverter.get_trend_semantic(t_score_total)
+        # Individual Trend Scores
+        t_1h_score = trend.get('trend_1h_score') 
+        t_15m_score = trend.get('trend_15m_score')
+        t_5m_score = trend.get('trend_5m_score')
+        t_1h_sem = SemanticConverter.get_trend_semantic(t_1h_score)
+        t_15m_sem = SemanticConverter.get_trend_semantic(t_15m_score)
+        t_5m_sem = SemanticConverter.get_trend_semantic(t_5m_score)
+        
+        o_score_total = oscillator.get('total_osc_score')
+        o_semantic = SemanticConverter.get_oscillator_semantic(o_score_total)
+        
+        s_score_total = sentiment.get('total_sentiment_score')
+        s_semantic = SemanticConverter.get_sentiment_score_semantic(s_score_total)
+
+        rsi_15m = oscillator.get('oscillator_15m', {}).get('details', {}).get('rsi_value')
+        rsi_1h = oscillator.get('oscillator_1h', {}).get('details', {}).get('rsi_value')
+        rsi_15m_semantic = SemanticConverter.get_rsi_semantic(rsi_15m)
+        rsi_1h_semantic = SemanticConverter.get_rsi_semantic(rsi_1h)
+        
+        # MACD
+        macd_15m = trend.get('details', {}).get('15m_macd_diff')
+        macd_semantic = SemanticConverter.get_macd_semantic(macd_15m)
+        
+        oi_change = sentiment.get('oi_change_24h_pct', 0)
+        oi_semantic = SemanticConverter.get_oi_change_semantic(oi_change)
+        
+        # 市场状态与价格位置
+        regime_type = "Unknown"
+        regime_confidence = 0
+        price_position = "Unknown"
+        price_position_pct = 50
+        if regime_info:
+            regime_type = regime_info.get('regime', 'unknown')
+            regime_confidence = regime_info.get('confidence', 0)
+            position_info_regime = regime_info.get('position', {})
+            price_position = position_info_regime.get('location', 'unknown')
+            price_position_pct = position_info_regime.get('position_pct', 50)
+        
+        # Helper to format values safely
+        def fmt_val(val, fmt="{:.2f}"):
+            return fmt.format(val) if val is not None else "N/A"
+
+            
+        # 构建持仓信息文本 (New)
+        position_section = ""
+        if position_info:
+            side_icon = "🟢" if position_info['side'] == 'LONG' else "🔴"
+            pnl_icon = "💰" if position_info['unrealized_pnl'] > 0 else "💸"
+            position_section = f"""
+## 💼 CURRENT POSITION STATUS (Virtual Sub-Agent Logic)
+> ⚠️ CRITICAL: YOU ARE HOLDING A POSITION. EVALUATE EXIT CONDITIONS FIRST.
+
+- **Status**: {side_icon} {position_info['side']}
+- **Entry Price**: ${position_info['entry_price']:,.2f}
+- **Current Price**: ${current_price:,.2f}
+- **PnL**: {pnl_icon} ${position_info['unrealized_pnl']:.2f} ({position_info['pnl_pct']:+.2f}%)
+- **Quantity**: {position_info['quantity']}
+- **Leverage**: {position_info['leverage']}x
+
+**EXIT JUDGMENT INSTRUCTION**:
+1. **Trend Reversal**: If current trend contradicts position side (e.g. Long but Trend turned Bearish), consider CLOSE.
+2. **Profit/Risk**: Check if PnL is satisfactory or risk is increasing.
+3. **If Closing**:
+   - current side is LONG -> return `close_long`
+   - current side is SHORT -> return `close_short`
+"""
+        
+        context = f"""
+## 1. Snapshot
+- Symbol: {self.symbol_manager.current_symbol}
+- Price: ${current_price:,.2f}
+"""
+
+        if position_section:
+            context += f"\n{position_section}\n"
+
+        context += "\n## 2. Four-Layer Status\n"
+        # Build four-layer status summary with smart grouping
+        blocking_reason = global_state.four_layer_result.get('blocking_reason', 'None')
+        layer1_pass = global_state.four_layer_result.get('layer1_pass')
+        layer2_pass = global_state.four_layer_result.get('layer2_pass')
+        layer3_pass = global_state.four_layer_result.get('layer3_pass')
+        layer4_pass = global_state.four_layer_result.get('layer4_pass')
+        
+        layer_status = []
+        
+        # Smart grouping: if both Layer 1 and 2 fail with same reason, merge them
+        if not layer1_pass and not layer2_pass:
+            layer_status.append(f"❌ **Layers 1-2 BLOCKED**: {blocking_reason}")
+        else:
+            if layer1_pass:
+                layer_status.append("✅ **Trend/Fuel**: PASS")
+            else:
+                layer_status.append(f"❌ **Trend/Fuel**: FAIL - {blocking_reason}")
+            
+            if layer2_pass:
+                layer_status.append("✅ **AI Filter**: PASS")
+            else:
+                layer_status.append(f"❌ **AI Filter**: VETO - {blocking_reason}")
+        
+        # Layer 3 & 4
+        layer_status.append(f"{'✅' if layer3_pass else '⏳'} **Setup (15m)**: {'READY' if layer3_pass else 'WAIT'}")
+        layer_status.append(f"{'✅' if layer4_pass else '⏳'} **Trigger (5m)**: {'CONFIRMED' if layer4_pass else 'WAITING'}")
+        
+        # Add risk adjustment
+        tp_mult = global_state.four_layer_result.get('tp_multiplier', 1.0)
+        sl_mult = global_state.four_layer_result.get('sl_multiplier', 1.0)
+        if tp_mult != 1.0 or sl_mult != 1.0:
+            layer_status.append(f"⚖️ **Risk Adjustment**: TP x{tp_mult} | SL x{sl_mult}")
+        
+        context += "\n".join(layer_status)
+        
+        # Add data anomaly warning
+        if global_state.four_layer_result.get('data_anomalies'):
+            anomalies = ', '.join(global_state.four_layer_result.get('data_anomalies', []))
+            context += f"\n\n⚠️ **DATA ANOMALY**: {anomalies}"
+
+        # Multi-Period Parser Summary (only if selected)
+        multi_period = None
+        if selected_agent_outputs and selected_agent_outputs.get('multi_period_agent'):
+            multi_period = selected_agent_outputs.get('multi_period_agent') or {}
+        if multi_period:
+            trend_scores = multi_period.get('trend_scores', {}) or {}
+            four_layer = multi_period.get('four_layer', {}) or {}
+            layer_pass = four_layer.get('layer_pass', {}) or {}
+            context += "\n\n## 3. Multi-Period\n"
+            context += (
+                f"- Alignment: {multi_period.get('alignment_reason', 'N/A')}\n"
+                f"- Bias: {multi_period.get('bias', 'N/A')}\n"
+                f"- Trend(1h/15m/5m): "
+                f"{trend_scores.get('trend_1h', 0):+.0f}/"
+                f"{trend_scores.get('trend_15m', 0):+.0f}/"
+                f"{trend_scores.get('trend_5m', 0):+.0f}\n"
+                f"- Four-Layer: {four_layer.get('final_action', 'WAIT')} "
+                f"(L1:{'Y' if layer_pass.get('L1') else 'N'}, "
+                f"L2:{'Y' if layer_pass.get('L2') else 'N'}, "
+                f"L3:{'Y' if layer_pass.get('L3') else 'N'}, "
+                f"L4:{'Y' if layer_pass.get('L4') else 'N'})"
+            )
+
+        # Selected agent outputs (explicitly inject for Decision Core)
+        if selected_agent_outputs:
+            context += "\n\n## 4. Enabled Agent Outputs (Compact)\n"
+            for key, val in selected_agent_outputs.items():
+                context += self._format_agent_output_for_context(key, val)
+
+        context += "\n\n## 5. Market Summary\n"
+        
+        # Extract analysis results (respect selected agents)
+        trend_result = {}
+        setup_result = {}
+        trigger_result = {}
+        if selected_agent_outputs:
+            trend_result = selected_agent_outputs.get('trend_agent', {})
+            setup_result = selected_agent_outputs.get('setup_agent', {})
+            trigger_result = selected_agent_outputs.get('trigger_agent', {})
+        else:
+            trend_result = getattr(global_state, 'semantic_analyses', {}).get('trend', {})
+            setup_result = getattr(global_state, 'semantic_analyses', {}).get('setup', {})
+            trigger_result = getattr(global_state, 'semantic_analyses', {}).get('trigger', {})
+        
+        if isinstance(trend_result, dict):
+            trend_stance = trend_result.get('stance', 'UNKNOWN')
+            trend_meta = trend_result.get('metadata', {})
+            trend_line = f"- Trend: {trend_stance} | Strength={trend_meta.get('strength', 'N/A')} | ADX={trend_meta.get('adx', 'N/A')}"
+        else:
+            trend_line = "- Trend: N/A"
+
+        if isinstance(setup_result, dict):
+            setup_stance = setup_result.get('stance', 'UNKNOWN')
+            setup_meta = setup_result.get('metadata', {})
+            setup_line = f"- Setup: {setup_stance} | Zone={setup_meta.get('zone', 'N/A')} | KDJ={setup_meta.get('kdj_j', 'N/A')} | MACD={setup_meta.get('macd_signal', 'N/A')}"
+        else:
+            setup_line = "- Setup: N/A"
+
+        if isinstance(trigger_result, dict):
+            trigger_stance = trigger_result.get('stance', 'UNKNOWN')
+            trigger_meta = trigger_result.get('metadata', {})
+            trigger_line = f"- Trigger: {trigger_stance} | Pattern={trigger_meta.get('pattern', 'NONE')} | RVOL={trigger_meta.get('rvol', 'N/A')}x"
+        else:
+            trigger_line = "- Trigger: N/A"
+
+        context += f"{trend_line}\n{setup_line}\n{trigger_line}\n"
+        
+        # Note: Market Regime and Price Position are already calculated by TREND and SETUP agents
+        # and included in their respective analyses above, so we don't duplicate them here.
+        
+        return context
+
+    def _format_agent_output_for_context(self, key: str, value: Any) -> str:
+        import json
+        try:
+            payload = json.dumps(value, ensure_ascii=False, default=str)
+        except Exception:
+            payload = str(value)
+        if len(payload) > 800:
+            payload = payload[:800] + "...(truncated)"
+        return f"- {key}: {payload}\n"

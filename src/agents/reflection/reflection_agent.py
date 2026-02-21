@@ -27,9 +27,9 @@ class ReflectionAgent(ABC):
     def get_latest_reflection(self) -> Optional[str]:
         pass
 
-    def build_user_prompt(self, trades: List[Dict]) -> Optional[str]:
+    def get_user_prompt(self, trades: List[Dict]) -> Optional[str]:
         return None
 
-    def build_system_prompt(self) -> Optional[str]:
+    def get_system_prompt(self) -> Optional[str]:
         return None
 

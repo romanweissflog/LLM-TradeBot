@@ -9,35 +9,12 @@ Analyzes 5m timeframe data and produces semantic analysis:
 
 from typing import Dict, Optional
 from src.llm import create_client, LLMConfig
-from src.config import config
+from src.config import Config
 from src.utils.logger import log
 
+from .trigger_agent import TriggerAgent
 
-def _compute_trigger_signals(data: Dict) -> Dict[str, Optional[float]]:
-    pattern = data.get('pattern') or data.get('trigger_pattern')
-    rvol = data.get('rvol') or data.get('trigger_rvol', 1.0)
-    volume_breakout = data.get('volume_breakout', False)
-
-    if pattern and pattern != 'None':
-        stance = 'CONFIRMED'
-        status = 'PATTERN_DETECTED'
-    elif volume_breakout or rvol > 1.0:
-        stance = 'VOLUME_SIGNAL'
-        status = 'BREAKOUT'
-    else:
-        stance = 'WAITING'
-        status = 'NO_SIGNAL'
-
-    return {
-        'stance': stance,
-        'status': status,
-        'pattern': pattern if pattern and pattern != 'None' else 'NONE',
-        'rvol': rvol,
-        'volume_breakout': volume_breakout
-    }
-
-
-class TriggerAgentLLM:
+class TriggerAgentLLM(TriggerAgent):
     """
     5m Trigger Analysis Agent
     
@@ -45,7 +22,10 @@ class TriggerAgentLLM:
     Output: Semantic analysis paragraph
     """
     
-    def __init__(self):
+    def __init__(
+        self,
+        config: Config
+    ):
         """Initialize TriggerAgentLLM with LLM client"""
         llm_config = config.llm
         provider = llm_config.get('provider', 'deepseek')
@@ -100,7 +80,7 @@ class TriggerAgentLLM:
             
             analysis = response.content.strip()
             
-            signals = _compute_trigger_signals(data)
+            signals = self._compute_trigger_signals(data)
             
             result = {
                 'analysis': analysis,
@@ -140,7 +120,7 @@ class TriggerAgentLLM:
                 'metadata': {'error': str(e)}
             }
     
-    def get_system_prompt(self) -> str:
+    def get_system_prompt(self) -> Optional[str]:
         """System prompt for trigger analysis"""
         return """You are a professional crypto trigger analyst. Your task is to analyze 5m timeframe data and assess entry triggers using candlestick patterns and volume.
 
@@ -202,60 +182,6 @@ Provide a 2-3 sentence semantic analysis of the trigger situation."""
 
     def _get_fallback_analysis(self, data: Dict) -> str:
         """Fallback analysis when LLM fails"""
-        pattern = data.get('pattern') or data.get('trigger_pattern')
-        rvol = data.get('rvol') or data.get('trigger_rvol', 1.0)
-        trend = data.get('trend_direction', 'neutral')
-        
-        if pattern and pattern != 'None':
-            return f"5m trigger CONFIRMED: {pattern} pattern detected with RVOL={rvol:.1f}x. Entry signal is valid for {trend} position."
-        elif rvol > 1.5:
-            return f"5m shows high volume activity (RVOL={rvol:.1f}x) but no clear pattern. Monitor for pattern formation."
-        else:
-            return f"5m shows no trigger pattern. RVOL={rvol:.1f}x is normal. Wait for engulfing pattern or volume breakout before entry."
-
-
-class TriggerAgent:
-    """
-    5m Trigger Analysis Agent (no LLM)
-
-    Uses rule-based heuristics only.
-    """
-
-    def __init__(self):
-        log.info("⚡ Trigger Agent (no LLM) initialized")
-
-    def analyze(self, data: Dict) -> Dict:
-        signals = _compute_trigger_signals(data)
-        analysis = self._get_fallback_analysis(data)
-        result = {
-            'analysis': analysis,
-            'stance': signals['stance'],
-            'metadata': {
-                'status': signals['status'],
-                'pattern': signals['pattern'],
-                'rvol': round(signals['rvol'], 1),
-                'volume_breakout': signals['volume_breakout']
-            }
-        }
-        log.info(f"⚡ Trigger Agent (no LLM) [{signals['stance']}] (Pattern: {signals['pattern']}, RVOL: {signals['rvol']:.1f}x) for {data.get('symbol', 'UNKNOWN')}")
-
-        try:
-            from src.server.state import global_state
-            if hasattr(global_state, 'saver') and hasattr(global_state, 'current_cycle_id'):
-                global_state.saver.save_trigger_analysis(
-                    analysis=analysis,
-                    input_data=data,
-                    symbol=data.get('symbol', 'UNKNOWN'),
-                    cycle_id=global_state.current_cycle_id,
-                    model='rule_based'
-                )
-        except Exception as e:
-            log.warning(f"Failed to save trigger analysis log: {e}")
-
-        return result
-
-    def _get_fallback_analysis(self, data: Dict) -> str:
-        """Fallback analysis using rule-based heuristics"""
         pattern = data.get('pattern') or data.get('trigger_pattern')
         rvol = data.get('rvol') or data.get('trigger_rvol', 1.0)
         trend = data.get('trend_direction', 'neutral')

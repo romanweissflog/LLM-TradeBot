@@ -2,7 +2,7 @@ from typing import Dict, List, Optional
 from datetime import datetime
 import json
 
-from src.agents.agent_config import AgentConfig
+from src.config import Config
 from src.llm import create_client, LLMConfig
 from src.utils.logger import log
 
@@ -21,7 +21,7 @@ class ReflectionAgentLLM(ReflectionAgent):
     
     def __init__(
         self,
-        config: AgentConfig
+        config: Config
     ):
         """Initialize ReflectionAgentLLM with LLM client"""
         # Get LLM config (same as StrategyEngine)
@@ -90,8 +90,8 @@ class ReflectionAgentLLM(ReflectionAgent):
         
         try:
             # Build prompts
-            system_prompt = self._build_system_prompt()
-            user_prompt = self._build_user_prompt(trades)
+            system_prompt = self.get_system_prompt()
+            user_prompt = self.get_user_prompt(trades)
             
             log.info(f"🧠 Generating reflection for {len(trades)} trades...")
             

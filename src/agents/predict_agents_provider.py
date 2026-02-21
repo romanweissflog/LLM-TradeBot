@@ -9,7 +9,7 @@ from src.agents.agent_config import AgentConfig
 from src.api.binance_client import BinanceClient
 from src.server.state import global_state
 
-from .symbol_manager import SymbolManager
+from src.trading.symbol_manager import SymbolManager
 
 class PredictAgentsProvider:
     def __init__(
@@ -21,7 +21,9 @@ class PredictAgentsProvider:
         self.client = client
         self.symbol_manager = symbol_manager
         self.agent_config = agents_config
+        print("[DEBUG] Creating TechnicalFeatureEngineer...")
         self.feature_engineer = TechnicalFeatureEngineer()  # 🔮 特征工程器 for Prophet
+        print("[DEBUG] TechnicalFeatureEngineer created")
         self.predict_agents = {}
 
         self.auto_trainer = ProphetAutoTrainer(

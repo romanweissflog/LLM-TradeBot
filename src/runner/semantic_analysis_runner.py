@@ -2,9 +2,12 @@ import asyncio
 from typing import Dict, Optional, Any
 
 from src.agents.agent_config import AgentConfig
+from src.agents.agent_provider import AgentProvider
 from src.config import Config
 
 from src.agents.runtime_events import emit_global_runtime_event
+from src.utils.task_util import run_task_with_timeout
+from src.utils.agents_util import get_agent_timeout
 
 from src.trading.symbol_manager import SymbolManager
 from src.utils.logger import log
@@ -16,10 +19,12 @@ class SemanticAnalysisRunner:
         config: Config,
         agent_config: AgentConfig,
         symbol_manager: SymbolManager,
+        agent_provider: AgentProvider,
     ):
         self.config = config
         self.agent_config = agent_config
         self.symbol_manager = symbol_manager
+        self.agent_provider = agent_provider
       
     async def run(
         self,
@@ -97,47 +102,17 @@ class SemanticAnalysisRunner:
             tasks = {}
             loop = asyncio.get_running_loop()
             if use_trend:
-                if use_trend_llm:
-                    from src.agents.trend_agent import TrendAgentLLM
-                    if not hasattr(self, '_trend_agent_llm'):
-                        self._trend_agent_llm = TrendAgentLLM()
-                    trend_agent = self._trend_agent_llm
-                else:
-                    from src.agents.trend_agent import TrendAgent
-                    if not hasattr(self, '_trend_agent_local'):
-                        self._trend_agent_local = TrendAgent()
-                    trend_agent = self._trend_agent_local
-                tasks['trend'] = loop.run_in_executor(None, trend_agent.analyze, trend_data)
+                tasks['trend'] = loop.run_in_executor(None, self.agent_provider.trend_agent.analyze, trend_data)
 
             if use_setup:
-                if use_setup_llm:
-                    from src.agents.setup_agent import SetupAgentLLM
-                    if not hasattr(self, '_setup_agent_llm'):
-                        self._setup_agent_llm = SetupAgentLLM()
-                    setup_agent = self._setup_agent_llm
-                else:
-                    from src.agents.setup_agent import SetupAgent
-                    if not hasattr(self, '_setup_agent_local'):
-                        self._setup_agent_local = SetupAgent()
-                    setup_agent = self._setup_agent_local
-                tasks['setup'] = loop.run_in_executor(None, setup_agent.analyze, setup_data)
+                tasks['setup'] = loop.run_in_executor(None, self.agent_provider.setup_agent.analyze, setup_data)
 
             if use_trigger:
-                if use_trigger_llm:
-                    from src.agents.trigger_agent import TriggerAgentLLM
-                    if not hasattr(self, '_trigger_agent_llm'):
-                        self._trigger_agent_llm = TriggerAgentLLM()
-                    trigger_agent = self._trigger_agent_llm
-                else:
-                    from src.agents.trigger_agent import TriggerAgent
-                    if not hasattr(self, '_trigger_agent_local'):
-                        self._trigger_agent_local = TriggerAgent()
-                    trigger_agent = self._trigger_agent_local
-                tasks['trigger'] = loop.run_in_executor(None, trigger_agent.analyze, trigger_data)
+                tasks['trigger'] = loop.run_in_executor(None, self.agent_provider.trigger_agent.analyze, trigger_data)
 
             analyses: Dict[str, Any] = {}
             if tasks:
-                semantic_timeout = self._get_agent_timeout('semantic_agent', 35.0)
+                semantic_timeout = get_agent_timeout(self.config, self.agent_config, 'semantic_agent', 35.0)
                 wrapped_tasks = {
                     key: run_task_with_timeout(
                         run_id=run_id,

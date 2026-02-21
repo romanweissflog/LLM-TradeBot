@@ -629,27 +629,27 @@ def _build_default_agent_settings() -> Dict[str, Any]:
         inst = TrendAgentLLM.__new__(TrendAgentLLM)
         defaults["agents"]["trend_agent"] = {
             "params": {"temperature": 0.3, "max_tokens": 300},
-            "system_prompt": inst._get_system_prompt()
+            "system_prompt": inst.get_system_prompt()
         }
     except Exception:
         defaults["agents"]["trend_agent"] = {"params": {"temperature": 0.3, "max_tokens": 300}, "system_prompt": ""}
 
     try:
-        from src.agents.setup_agent import SetupAgentLLM
+        from src.agents.setup.setup_agent_llm import SetupAgentLLM
         inst = SetupAgentLLM.__new__(SetupAgentLLM)
         defaults["agents"]["setup_agent"] = {
             "params": {"temperature": 0.3, "max_tokens": 300},
-            "system_prompt": inst._get_system_prompt()
+            "system_prompt": inst.get_system_prompt()
         }
     except Exception:
         defaults["agents"]["setup_agent"] = {"params": {"temperature": 0.3, "max_tokens": 300}, "system_prompt": ""}
 
     try:
-        from src.agents.trigger_agent import TriggerAgentLLM
+        from src.agents.trigger.trigger_agent_llm import TriggerAgentLLM
         inst = TriggerAgentLLM.__new__(TriggerAgentLLM)
         defaults["agents"]["trigger_agent"] = {
             "params": {"temperature": 0.3, "max_tokens": 300},
-            "system_prompt": inst._get_system_prompt()
+            "system_prompt": inst.get_system_prompt()
         }
     except Exception:
         defaults["agents"]["trigger_agent"] = {"params": {"temperature": 0.3, "max_tokens": 300}, "system_prompt": ""}
@@ -660,7 +660,7 @@ def _build_default_agent_settings() -> Dict[str, Any]:
         inst = ReflectionAgent.__new__(ReflectionAgent)
         defaults["agents"]["reflection_agent"] = {
             "params": {"temperature": 0.7, "max_tokens": 1500},
-            "system_prompt": inst._build_system_prompt()
+            "system_prompt": inst.get_system_prompt()
         }
     except Exception:
         defaults["agents"]["reflection_agent"] = {"params": {"temperature": 0.7, "max_tokens": 1500}, "system_prompt": ""}

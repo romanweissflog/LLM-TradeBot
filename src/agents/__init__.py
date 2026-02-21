@@ -16,6 +16,7 @@ Optional Agents (configurable via AgentConfig):
 from .agent_config import AgentConfig
 from .base_agent import BaseAgent, AgentResult
 from .agent_registry import AgentRegistry
+from .agent_provider import AgentProvider
 
 # Core Agents
 from .data_sync_agent import DataSyncAgent, MarketSnapshot
@@ -27,10 +28,12 @@ from .risk_audit_agent import RiskAuditAgent, RiskCheckResult, PositionInfo, Ris
 from .predict_result import PredictResult
 from .predict_agent import PredictAgent
 from .multi_period_agent import MultiPeriodParserAgent
+from .regime_detector_agent import RegimeDetector
 
 __all__ = [
     # Framework
     'AgentConfig',
+    'AgentProvider',
     'BaseAgent',
     'AgentResult',
     'AgentRegistry',
@@ -49,4 +52,5 @@ __all__ = [
     'PredictAgent',
     'PredictResult',
     'MultiPeriodParserAgent',
+    'RegimeDetector'
 ]

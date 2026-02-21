@@ -5,16 +5,14 @@ from dataclasses import asdict
 
 from src.config import Config
 from src.agents.agent_config import AgentConfig
+from src.agents.agent_provider import AgentProvider
 
 from src.utils.data_saver import DataSaver
-from src.agents.quant_analyst_agent import QuantAnalystAgent
 from src.agents.reflection import (
-    ReflectionAgent,
     ReflectionResult
 )
 
 from src.trading.symbol_manager import SymbolManager
-from src.trading.predict_agents_provider import PredictAgentsProvider
 from src.agents.predict_result import PredictResult
 
 from src.server.state import global_state
@@ -22,24 +20,20 @@ from src.server.state import global_state
 from src.utils.task_util import run_task_with_timeout
 from src.utils.agents_util import get_agent_timeout
 
-class ParallelAnalysesRunner:
+class ParallelAnalysisRunner:
     def __init__(
         self,
         config: Config,
         agent_config: AgentConfig,
         symbol_manager: SymbolManager,
-        predict_agents_provider: PredictAgentsProvider,
-        reflection_agent: Optional[ReflectionAgent],
-        saver: DataSaver,
+        agent_provider: AgentProvider,
+        saver: DataSaver
     ):
         self.config = config
         self.agent_config = agent_config
         self.symbol_manager = symbol_manager
-        self.predict_agents_provider = predict_agents_provider
         self.saver = saver
-        self.reflection_agent = reflection_agent
-
-        self.quant_analyst = QuantAnalystAgent()
+        self.agent_provider = agent_provider
 
     async def run(
         self,
@@ -54,7 +48,7 @@ class ParallelAnalysesRunner:
         Run quant/predict/reflection in parallel with timeouts and safe fallbacks.
         """
         async def quant_task():
-            res = await self.quant_analyst.analyze_all_timeframes(market_snapshot)
+            res = await self.agent_provider.quant_analyst.analyze_all_timeframes(market_snapshot)
             trend_score = res.get('trend', {}).get('total_trend_score', 0)
             osc_score = res.get('oscillator', {}).get('total_osc_score', 0)
             sent_score = res.get('sentiment', {}).get('total_sentiment_score', 0)
@@ -63,22 +57,22 @@ class ParallelAnalysesRunner:
             return res
 
         async def predict_task() -> Optional[PredictResult]:
-            prediction = await self.predict_agents_provider.predict(processed_dfs)
+            prediction = await self.agent_provider.predict_agents_provider.predict(processed_dfs)
             if prediction:
                 self.saver.save_prediction(asdict(prediction), self.symbol_manager.current_symbol, snapshot_id, cycle_id=cycle_id)
             return prediction
 
         async def reflection_task() -> Optional[ReflectionResult]:
             total_trades = len(global_state.trade_history)
-            if self.reflection_agent and self.reflection_agent.should_reflect(total_trades):
+            if self.agent_provider.reflection_agent and self.agent_provider.reflection_agent.should_reflect(total_trades):
                 global_state.add_agent_message("reflection_agent", "🔍 Reflecting on recent trade performance...", level="info")
                 trades_to_analyze = global_state.trade_history[-10:]
-                res = await self.reflection_agent.generate_reflection(trades_to_analyze)
+                res = await self.agent_provider.reflection_agent.generate_reflection(trades_to_analyze)
                 if res:
                     reflection_text = res.to_prompt_text()
                     global_state.last_reflection = res.raw_response
                     global_state.last_reflection_text = reflection_text
-                    global_state.reflection_count = self.reflection_agent.reflection_count
+                    global_state.reflection_count = self.agent_provider.reflection_agent.reflection_count
                     global_state.add_agent_message(
                         "reflection_agent",
                         f"Reflected on {len(trades_to_analyze)} trades. Insight: {res.insight}",

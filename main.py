@@ -4837,7 +4837,7 @@ class MultiAgentTradingBot:
             "trading_mode": "live",
             "is_test_mode": False,
             "available_balance": float(avail or 0.0),
-            "wallet_balance": float(acc.get('wallet_balance') or 0.0),
+            "wallet_balance": float(acc_info.get('wallet_balance') or 0.0),
             "total_equity": equity
         }
 

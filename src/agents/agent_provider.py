@@ -46,8 +46,6 @@ class AgentProvider:
         self.symbol_manager = symbol_manager
         self._set_predict_agents_provider()
         self._set_agents()
-        
-        self.data_sync_agent = DataSyncAgent(client)
 
         self.risk_audit_agent = RiskAuditAgent(
             max_leverage=10.0,
@@ -61,7 +59,11 @@ class AgentProvider:
         print("  ✅ QuantAnalystAgent ready")
         print("  ✅ RiskAuditAgent ready")
 
-    def reload(self):
+    def reload(
+        self,
+        client: BinanceClient
+    ):
+        self.client = client
         self._set_agents()
 
         if self.agent_config.predict_agent:
@@ -70,6 +72,8 @@ class AgentProvider:
             self.predict_agents_provider = None
 
     def _set_agents(self):
+        self.data_sync_agent = DataSyncAgent(self.client)
+
         self._set_reflection_agent()
         self._set_trend_agent()
         self._set_setup_agent()

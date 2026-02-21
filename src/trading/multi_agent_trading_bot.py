@@ -81,6 +81,7 @@ class MultiAgentTradingBot:
 
         self.test_mode = test_mode
         global_state.is_test_mode = test_mode  # Set test mode in global state
+        global_state.mode_switch_handler = self.switch_runtime_mode
 
         # Cycle logging (DB)
         self._cycle_logger = None
@@ -1130,37 +1131,131 @@ class MultiAgentTradingBot:
             }
         return stats
 
+    def switch_runtime_mode(self, target_mode: str) -> Dict[str, Any]:
+        """Switch test/live mode at runtime. Safe path: switch while not Running."""
+        mode = (target_mode or "").strip().lower()
+        if mode not in {"test", "live"}:
+            raise ValueError("Invalid mode. Must be 'test' or 'live'.")
+
+        current_mode = "test" if self.test_mode else "live"
+        if mode == current_mode:
+            return {"trading_mode": current_mode, "is_test_mode": self.test_mode}
+
+        if global_state.execution_mode == "Running":
+            raise RuntimeError("Please stop or pause the bot before switching mode.")
+
+        if mode == "test":
+            if not self.test_mode:
+                live_active = self._get_active_position_symbols()
+                if live_active:
+                    raise RuntimeError(
+                        f"Cannot switch to TEST while LIVE positions are open: {', '.join(live_active)}"
+                    )
+            self.test_mode = True
+            global_state.is_test_mode = True
+            global_state.virtual_initial_balance = 1000.0
+            global_state.virtual_balance = 1000.0
+            global_state.virtual_positions = {}
+            global_state.cumulative_realized_pnl = 0.0
+            self._save_virtual_state()
+            global_state.init_balance(global_state.virtual_balance, initial_balance=global_state.virtual_initial_balance)
+            global_state.update_account(
+                equity=global_state.virtual_balance,
+                available=global_state.virtual_balance,
+                wallet=global_state.virtual_balance,
+                pnl=0.0
+            )
+            global_state.add_log("🧪 Switched to TEST mode (paper account reset to $1000.00).")
+            return {"trading_mode": "test", "is_test_mode": True}
+
+        # mode == "live"
+        self.test_mode = False
+        global_state.is_test_mode = False
+        # Prevent TEST session realized PnL from leaking into LIVE account display.
+        global_state.cumulative_realized_pnl = 0.0
+        
+        # Force reload .env file to pick up latest API keys from settings
+        from dotenv import load_dotenv
+        import os
+        load_dotenv(self._env_path, override=True)
+        
+        # Read fresh API keys from environment
+        fresh_api_key = os.getenv('BINANCE_API_KEY')
+        fresh_api_secret = os.getenv('BINANCE_SECRET_KEY') or os.getenv('BINANCE_API_SECRET')
+        
+        if not fresh_api_key or not fresh_api_secret:
+            self.test_mode = True
+            global_state.is_test_mode = True
+            raise RuntimeError("请在设置中配置 Binance API Key 和 Secret Key")
+        
+        # Update config with fresh values
+        self.config._config['binance']['api_key'] = fresh_api_key
+        self.config._config['binance']['api_secret'] = fresh_api_secret
+        
+        # Recreate client on mode switch to pick up latest env/config credentials.
+        self.client = BinanceClient()
+        self.agent_provider.reload(self.client)
+        self.runner_provider.reload(self.client)
+
+        try:
+            acc_info = self.client.get_futures_account()
+        except Exception as e:
+            self.test_mode = True
+            global_state.is_test_mode = True
+            raise RuntimeError(f"Failed to fetch live account balance: {e}")
+
+        wallet = float(acc_info.get('total_wallet_balance', 0) or 0.0)
+        unrealized = float(acc_info.get('total_unrealized_profit', 0) or 0.0)
+        avail = float(acc_info.get('available_balance', 0) or 0.0)
+        equity = wallet + unrealized
+        if equity <= 0:
+            self.test_mode = True
+            global_state.is_test_mode = True
+            raise RuntimeError("Fetched live account balance is zero/invalid. Check account/API permissions.")
+        global_state.update_account(equity=equity, available=avail, wallet=wallet, pnl=unrealized)
+        global_state.init_balance(equity, initial_balance=equity)
+        self._sync_open_positions_to_trade_history()
+        global_state.add_log("💰 Switched to LIVE mode.")
+        return {
+            "trading_mode": "live",
+            "is_test_mode": False,
+            "available_balance": float(avail or 0.0),
+            "wallet_balance": float(acc_info.get('total_wallet_balance') or 0.0),
+            "total_equity": equity
+        }
+
     def _start_account_monitor(self):
         """Start a background thread to monitor account equity in real-time"""
         def _monitor():
-            if self.test_mode:
-                log.info("💰 Account Monitor Thread: Disabled in Test Mode")
-                return
-                
             log.info("💰 Account Monitor Thread Started")
             while True:
-                # Check Control State
-                if global_state.execution_mode == "Stopped":
+                if not global_state.is_running:
                     break
-                
-                # We update even if Paused, to see PnL of open positions
+
+                # Keep thread alive while stopped/paused so mode switching remains responsive.
+                if global_state.execution_mode == "Stopped":
+                    time.sleep(1)
+                    continue
+
+                if self.test_mode:
+                    time.sleep(2)
+                    continue
+
                 try:
                     acc = self.client.get_futures_account()
-                    
                     wallet = float(acc.get('total_wallet_balance', 0))
                     pnl = float(acc.get('total_unrealized_profit', 0))
                     avail = float(acc.get('available_balance', 0))
                     equity = wallet + pnl
-                    
                     global_state.update_account(equity, avail, wallet, pnl)
-                    global_state.record_account_success()  # Track success
+                    global_state.record_account_success()
                 except Exception as e:
                     log.error(f"Account Monitor Error: {e}")
-                    global_state.record_account_failure()  # Track failure
-                    global_state.add_log(f"❌ Account info fetch failed: {str(e)}")  # Dashboard log
-                    time.sleep(5) # Backoff on error
-                
-                time.sleep(3) # Update every 3 seconds
+                    global_state.record_account_failure()
+                    global_state.add_log(f"❌ Account info fetch failed: {str(e)}")
+                    time.sleep(5)
+
+                time.sleep(3)
 
         t = threading.Thread(target=_monitor, daemon=True)
         t.start()

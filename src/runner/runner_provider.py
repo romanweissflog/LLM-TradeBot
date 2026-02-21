@@ -118,3 +118,10 @@ class RunnerProvider:
             symbol_manager,
             agent_provider
         )
+
+    def reload(
+        self,
+        client: BinanceClient
+    ):
+        self.oracle_stage_runner.client = client
+        self.risk_audit_stage_runner.client = client

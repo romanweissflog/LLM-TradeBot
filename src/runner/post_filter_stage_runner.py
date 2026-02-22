@@ -8,6 +8,8 @@ from src.server.state import global_state
 
 from src.trading.symbol_manager import SymbolManager
 
+from .runner_decorators import log_run
+
 if TYPE_CHECKING:
     from .runner_provider import RunnerProvider
 
@@ -22,6 +24,7 @@ class PostFilterStageRunner:
         self.agent_provider = agent_provider  
         self.runner_provider = runner_provider
 
+    @log_run
     async def run(
         self,
         *,

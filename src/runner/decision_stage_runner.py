@@ -7,7 +7,8 @@ from dataclasses import asdict
 from src.config import Config
 from src.strategy.llm_engine import StrategyEngine
 from src.agents.agent_config import AgentConfig
-from src.agents.decision_core_agent import VoteResult, DecisionCoreAgent
+from src.agents.decision_core_agent import VoteResult
+from src.agents.agent_provider import AgentProvider
 from src.utils.semantic_converter import SemanticConverter  # ✅ Global Import
 
 from src.agents.runtime_events import emit_global_runtime_event
@@ -18,6 +19,7 @@ from src.trading.symbol_manager import SymbolManager
 from src.agents.predict_result import PredictResult  # ✅ PredictResult Import
 from src.utils.logger import log
 from src.server.state import global_state
+from .runner_decorators import log_run
 
 from src.utils.action_protocol import (
     normalize_action
@@ -30,16 +32,17 @@ class DecisionStageRunner:
         agent_config: AgentConfig,
         symbol_manager: SymbolManager,
         strategy_engine: StrategyEngine,
+        agent_provider: AgentProvider,
         max_position_size: float = 100.0,
     ):
         self.config = config
         self.agent_config = agent_config
         self.symbol_manager = symbol_manager
         self.max_position_size = max_position_size
+        self.agent_provider = agent_provider
         self.strategy_engine = strategy_engine
-        
-        self.decision_core = DecisionCoreAgent()
     
+    @log_run
     async def run(
         self,
         *,
@@ -234,7 +237,7 @@ class DecisionStageRunner:
             else:
                 global_state.add_agent_message("decision_core", "⚖️ Running rule-based decision logic...", level="info")
                 decision_source = 'decision_core'
-                vote_core = await self.decision_core.make_decision(
+                vote_core = await self.agent_provider.decision_core.make_decision(
                     quant_analysis=quant_analysis,
                     predict_result=predict_result,
                     market_data=market_data

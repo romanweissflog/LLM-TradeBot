@@ -13,6 +13,8 @@ from src.trading.symbol_manager import SymbolManager
 from src.utils.logger import log
 from src.server.state import global_state
 
+from .runner_decorators import log_run
+
 class SemanticAnalysisRunner:
     def __init__(
         self,
@@ -26,6 +28,7 @@ class SemanticAnalysisRunner:
         self.symbol_manager = symbol_manager
         self.agent_provider = agent_provider
       
+    @log_run
     async def run(
         self,
         *,

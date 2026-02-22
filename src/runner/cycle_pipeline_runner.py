@@ -6,6 +6,8 @@ from src.agents.runtime_events import emit_global_runtime_event, emit_cycle_pipe
 from src.trading.cycle_context import CycleContext
 from src.trading.symbol_manager import SymbolManager
 
+from .runner_decorators import log_run
+
 if TYPE_CHECKING:
     from .runner_provider import RunnerProvider
 
@@ -18,6 +20,7 @@ class CyclePipelineRunner:
         self.symbol_manager = symbol_manager
         self.runner_provider = runner_provider
     
+    @log_run
     async def run(self, *, context: CycleContext, analyze_only: bool) -> Dict[str, Any]:
         """Run the full trading pipeline using a prepared cycle context."""
         emit_global_runtime_event(

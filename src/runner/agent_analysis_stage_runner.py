@@ -9,6 +9,8 @@ from src.agents.predict_result import PredictResult  # ✅ PredictResult Import
 from src.utils.logger import log
 from src.server.state import global_state
 
+from .runner_decorators import log_run
+
 if TYPE_CHECKING:
     from .runner_provider import RunnerProvider
 
@@ -23,6 +25,7 @@ class AgentAnalysisStageRunner:
         self.saver = saver
         self.runner_provider = runner_provider
 
+    @log_run
     async def run(
         self,
         *,

@@ -8,6 +8,8 @@ from src.trading.result_builder import ResultBuilder
 
 from src.utils.data_saver import DataSaver
 
+from .runner_decorators import log_run
+
 if TYPE_CHECKING:
     from .runner_provider import RunnerProvider
 
@@ -25,6 +27,7 @@ class ActionPipelineStageRunner:
             saver
         )
     
+    @log_run
     async def run(
         self,
         *,

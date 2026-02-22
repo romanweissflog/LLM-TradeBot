@@ -13,6 +13,8 @@ from src.server.state import global_state
 
 from src.trading.symbol_manager import SymbolManager
 
+from .runner_decorators import log_run
+
 class FourLayerFilterStageRunner:
     def __init__(
         self,
@@ -26,6 +28,7 @@ class FourLayerFilterStageRunner:
         self.agent_provider = agent_provider
         self.symbol_manager = symbol_manager
 
+    @log_run
     def run(
         self,
         *,

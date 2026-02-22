@@ -24,6 +24,8 @@ from src.utils.action_protocol import (
     is_close_action,
 )
 
+from .runner_decorators import log_run
+
 class RiskAuditStageRunner:
     def __init__(
         self,
@@ -47,6 +49,7 @@ class RiskAuditStageRunner:
         self.take_profit_pct = take_profit_pct
         self.test_mode = test_mode
     
+    @log_run
     async def run(
         self,
         *,

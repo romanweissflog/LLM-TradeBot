@@ -21,6 +21,8 @@ from src.utils.agents_util import get_agent_timeout
 from src.utils.logger import log
 from src.server.state import global_state
 
+from .runner_decorators import log_run
+
 class OracleStageRunner:
     def __init__(
         self,
@@ -50,6 +52,7 @@ class OracleStageRunner:
         self.processor = MarketDataProcessor()  # ✅ 初始化数据处理器
         print("[DEBUG] MarketDataProcessor created")
 
+    @log_run
     async def run(
         self,
         *,

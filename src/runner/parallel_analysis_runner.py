@@ -18,6 +18,8 @@ from src.server.state import global_state
 from src.utils.task_util import run_task_with_timeout
 from src.utils.agents_util import get_agent_timeout
 
+from .runner_decorators import log_run
+
 class ParallelAnalysisRunner:
     def __init__(
         self,
@@ -33,6 +35,7 @@ class ParallelAnalysisRunner:
         self.saver = saver
         self.agent_provider = agent_provider
 
+    @log_run
     async def run(
         self,
         *,

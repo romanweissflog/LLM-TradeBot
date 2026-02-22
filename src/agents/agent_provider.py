@@ -10,6 +10,7 @@ from .quant_analyst_agent import QuantAnalystAgent
 from .regime_detector_agent import RegimeDetector
 from .data_sync_agent import DataSyncAgent
 from .multi_period_agent import MultiPeriodParserAgent
+from src.agents.decision_core_agent import DecisionCoreAgent
 
 from .reflection.reflection_agent_llm import ReflectionAgentLLM
 from .reflection.reflection_agent_no_llm import ReflectionAgentNoLLM
@@ -47,11 +48,13 @@ class AgentProvider:
         self.quant_analyst_agent = QuantAnalystAgent()
         
         self.multi_period_agent = MultiPeriodParserAgent()
+        self.decision_core_agent = DecisionCoreAgent()
           
         print("  ✅ DataSyncAgent ready")
         print("  ✅ QuantAnalystAgent ready")
         print("  ✅ RiskAuditAgent ready")
         print("  ✅ MultiPeriodParserAgent ready")
+        print("  ✅ DecisionCoreAgent ready")
 
     def reload(
         self,

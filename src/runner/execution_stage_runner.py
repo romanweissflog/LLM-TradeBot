@@ -20,6 +20,8 @@ from src.agents import (
     PositionInfo
 )
 
+from .runner_decorators import log_run
+
 class ExecutionStageRunner:
     def __init__(
         self,
@@ -31,6 +33,7 @@ class ExecutionStageRunner:
         self.saver = saver
         self.test_mode = test_mode
     
+    @log_run
     async def run(
         self,
         *,

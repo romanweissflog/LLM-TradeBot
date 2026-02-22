@@ -16,8 +16,9 @@ from src.utils.action_protocol import (
 if TYPE_CHECKING:
     from .runner_provider import RunnerProvider
 
-class DecisionPipelineStageRunner:
+from .runner_decorators import log_run
 
+class DecisionPipelineStageRunner:
     def __init__(
         self,
         symbol_manager: SymbolManager,
@@ -34,6 +35,7 @@ class DecisionPipelineStageRunner:
         )
         self.test_mode = test_mode
 
+    @log_run
     async def run(
         self,
         *,

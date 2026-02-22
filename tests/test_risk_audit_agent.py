@@ -174,3 +174,60 @@ def test_does_not_override_when_sideways_even_with_high_confidence():
 
     assert result.passed is False
     assert "allow_short=False" in (result.blocked_reason or "")
+
+
+def test_allows_short_with_continuation_guard_when_setup_is_weak():
+    decision = _base_decision("open_short")
+    decision["confidence"] = 60.0
+    decision["regime"] = {"regime": "Trending Down"}
+    decision["position"] = {"position_pct": 78.0, "location": "upper"}
+    decision["position_1h"] = {"allow_long": True, "allow_short": True, "position_pct": 78.0, "location": "upper"}
+    decision["trend_scores"] = {
+        "trend_1h_score": -62.0,
+        "trend_15m_score": -24.0,
+        "trend_5m_score": -8.0,
+    }
+    decision["oscillator_scores"] = {"osc_1h_score": -12.0, "osc_15m_score": -9.0, "osc_5m_score": -6.0}
+    decision["four_layer"] = {
+        "layer1_pass": True,
+        "layer2_pass": True,
+        "layer3_pass": True,
+        "layer4_pass": True,
+        "final_action": "short",
+        "trigger_pattern": "soft_momentum",
+        "adx": 31.0,
+    }
+
+    result = _audit(decision)
+
+    assert result.passed is True
+    assert result.warnings is not None
+    assert any("延续信号" in warning for warning in result.warnings)
+
+
+def test_continuation_guard_disabled_in_sideways_regime():
+    decision = _base_decision("open_short")
+    decision["confidence"] = 60.0
+    decision["regime"] = {"regime": "Sideways (Consolidation)"}
+    decision["position"] = {"position_pct": 78.0, "location": "upper"}
+    decision["position_1h"] = {"allow_long": True, "allow_short": True, "position_pct": 78.0, "location": "upper"}
+    decision["trend_scores"] = {
+        "trend_1h_score": -62.0,
+        "trend_15m_score": -24.0,
+        "trend_5m_score": -8.0,
+    }
+    decision["oscillator_scores"] = {"osc_1h_score": -12.0, "osc_15m_score": -9.0, "osc_5m_score": -6.0}
+    decision["four_layer"] = {
+        "layer1_pass": True,
+        "layer2_pass": True,
+        "layer3_pass": True,
+        "layer4_pass": True,
+        "final_action": "short",
+        "trigger_pattern": "soft_momentum",
+        "adx": 31.0,
+    }
+
+    result = _audit(decision)
+
+    assert result.passed is False
+    assert "空头信号未达到强共振条件" in (result.blocked_reason or "")

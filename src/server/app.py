@@ -704,6 +704,10 @@ def _build_default_agent_settings() -> Dict[str, Any]:
                 "auto1_interval": SymbolSelectorAgent.AUTO1_INTERVAL,
                 "auto1_volume_ratio_threshold": SymbolSelectorAgent.AUTO1_VOLUME_RATIO_THRESHOLD,
                 "auto1_min_adx": SymbolSelectorAgent.AUTO1_MIN_ADX,
+                "auto1_candidate_top_n": SymbolSelectorAgent.AUTO1_CANDIDATE_TOP_N,
+                "auto1_min_directional_score": SymbolSelectorAgent.AUTO1_MIN_DIRECTIONAL_SCORE,
+                "auto1_min_alignment_score": SymbolSelectorAgent.AUTO1_MIN_ALIGNMENT_SCORE,
+                "auto1_relax_factor": SymbolSelectorAgent.AUTO1_RELAX_FACTOR,
                 "min_quote_volume": SymbolSelectorAgent.DEFAULT_MIN_QUOTE_VOL,
                 "min_price": SymbolSelectorAgent.DEFAULT_MIN_PRICE,
                 "min_quote_volume_per_usdt": SymbolSelectorAgent.DEFAULT_MIN_QUOTE_VOL_PER_USDT

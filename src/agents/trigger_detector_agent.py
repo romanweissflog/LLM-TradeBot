@@ -138,8 +138,12 @@ class TriggerDetector:
             breakout_level = prev_3['low'].min()
             price_breakout = curr['close'] < breakout_level
         
-        # 成交量放大1.0倍 (降低阈值以增加触发率)
-        volume_confirm = volume_ratio > 1.0  # 原值: 1.5
+        # 动态量能阈值: 趋势延续阶段允许更低确认门槛
+        avg_prev_range = (prev_3['high'] - prev_3['low']).mean()
+        curr_range = max(float(curr['high'] - curr['low']), 0.0)
+        range_ratio = (curr_range / avg_prev_range) if avg_prev_range > 0 else 1.0
+        volume_threshold = 0.85 if range_ratio >= 0.9 else 1.0
+        volume_confirm = volume_ratio >= volume_threshold
         
         detected = price_breakout and volume_confirm
         
@@ -153,9 +157,65 @@ class TriggerDetector:
             'pattern': 'breakout',
             'breakout_level': breakout_level,
             'volume_ratio': volume_ratio,
+            'volume_threshold': volume_threshold,
             'current_price': curr['close'],
             'current_volume': curr['volume'],
             'vol_ma3': vol_ma3
+        }
+
+    def detect_continuation(self, df_5m: pd.DataFrame, direction: str = 'long') -> Dict:
+        """
+        Detect trend continuation pattern (break-retest-resume style).
+        """
+        if len(df_5m) < 8:
+            return {'detected': False, 'pattern': None}
+
+        curr = df_5m.iloc[-1]
+        prev_1 = df_5m.iloc[-2]
+        prev_2 = df_5m.iloc[-3]
+        lookback = df_5m.iloc[-8:-1]
+        if lookback.empty:
+            return {'detected': False, 'pattern': None}
+
+        swing_high = float(lookback['high'].max())
+        swing_low = float(lookback['low'].min())
+        avg_volume = float(lookback['volume'].mean()) if 'volume' in lookback.columns else 0.0
+        avg_range = float((lookback['high'] - lookback['low']).mean())
+        curr_range = max(float(curr['high'] - curr['low']), 0.0)
+        body = abs(float(curr['close'] - curr['open']))
+        body_ratio = (body / curr_range) if curr_range > 0 else 0.0
+        close_5ago = float(df_5m['close'].iloc[-6]) if len(df_5m) >= 6 else float(prev_2['close'])
+        rvol = self.calculate_rvol(df_5m, lookback=8)
+
+        if direction == 'long':
+            trend_bias = float(prev_1['close']) > close_5ago
+            resumed = float(curr['close']) > float(curr['open']) and float(curr['close']) >= float(prev_1['close'])
+            structure_ok = float(curr['close']) >= swing_high * 0.995
+        else:
+            trend_bias = float(prev_1['close']) < close_5ago
+            resumed = float(curr['close']) < float(curr['open']) and float(curr['close']) <= float(prev_1['close'])
+            structure_ok = float(curr['close']) <= swing_low * 1.005
+
+        volatility_ok = True if avg_range <= 0 else (curr_range >= avg_range * 0.7)
+        volume_ok = (float(curr['volume']) >= avg_volume * 0.8) if avg_volume > 0 else True
+        momentum_ok = body_ratio >= 0.35
+        rvol_ok = rvol >= 0.7
+        detected = bool(trend_bias and resumed and structure_ok and volatility_ok and momentum_ok and (volume_ok or rvol_ok))
+
+        if detected:
+            log.info(
+                f"⚡ Continuation detected ({direction}): close={float(curr['close']):.4f}, "
+                f"structure={'HIGH' if direction == 'long' else 'LOW'} hit, RVOL={rvol:.2f}x"
+            )
+
+        return {
+            'detected': detected,
+            'pattern': 'continuation',
+            'structure_level': swing_high if direction == 'long' else swing_low,
+            'rvol': rvol,
+            'body_ratio': body_ratio,
+            'volume_ok': volume_ok,
+            'volatility_ok': volatility_ok
         }
     
     def detect_trigger(self, df_5m: pd.DataFrame, direction: str = 'long') -> Dict:
@@ -180,6 +240,9 @@ class TriggerDetector:
         # Check breakout
         breakout_result = self.detect_breakout(df_5m, direction)
         
+        # Check continuation
+        continuation_result = self.detect_continuation(df_5m, direction)
+
         # 🆕 Calculate RVOL (Relative Volume vs 10-period average)
         rvol = self.calculate_rvol(df_5m)
         
@@ -197,23 +260,51 @@ class TriggerDetector:
                 'details': breakout_result,
                 'rvol': rvol
             }
-        # 🆕 RVOL-only fallback: 当有足够成交量+价格动量时触发
-        elif rvol >= 0.5:
+        elif continuation_result['detected']:
+            return {
+                'triggered': True,
+                'pattern_type': 'continuation',
+                'details': continuation_result,
+                'rvol': max(rvol, continuation_result.get('rvol', rvol))
+            }
+        # RVOL fallback: require basic momentum quality to avoid chop false-triggers
+        elif rvol >= 0.65:
             # 检查价格动量 (当前K线方向与交易方向一致)
-            if len(df_5m) >= 1:
+            if len(df_5m) >= 2:
                 curr = df_5m.iloc[-1]
+                prev = df_5m.iloc[-2]
+                avg_range = None
+                if len(df_5m) >= 6:
+                    avg_range = (df_5m['high'].iloc[-6:-1] - df_5m['low'].iloc[-6:-1]).mean()
+                curr_range = float(curr['high'] - curr['low']) if float(curr['high'] - curr['low']) > 0 else 0.0
+                body = abs(float(curr['close'] - curr['open']))
+                body_ratio = (body / curr_range) if curr_range > 0 else 0.0
                 momentum_ok = False
-                if direction == 'long' and curr['close'] > curr['open']:
+                if (
+                    direction == 'long'
+                    and curr['close'] > curr['open']
+                    and prev['close'] > prev['open']
+                    and curr['close'] > prev['close']
+                ):
                     momentum_ok = True
-                elif direction == 'short' and curr['close'] < curr['open']:
+                elif (
+                    direction == 'short'
+                    and curr['close'] < curr['open']
+                    and prev['close'] < prev['open']
+                    and curr['close'] < prev['close']
+                ):
                     momentum_ok = True
-                
-                if momentum_ok:
+
+                quality_ok = body_ratio >= 0.3
+                if avg_range is not None and avg_range > 0:
+                    quality_ok = quality_ok and (curr_range >= avg_range * 0.55)
+
+                if momentum_ok and quality_ok:
                     log.info(f"📊 RVOL trigger activated ({direction}): RVOL={rvol:.2f}x with momentum")
                     return {
                         'triggered': True,
                         'pattern_type': 'rvol_momentum',
-                        'details': {'rvol': rvol, 'momentum': True},
+                        'details': {'rvol': rvol, 'momentum': True, 'body_ratio': body_ratio},
                         'rvol': rvol
                     }
         

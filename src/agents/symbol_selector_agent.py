@@ -111,6 +111,41 @@ def calculate_adx(klines: List[Dict], period: int = 14) -> float:
         return 0.0
 
 
+def calculate_ema(values: List[float], period: int) -> List[float]:
+    """Simple EMA implementation returning the full EMA series tail."""
+    if period <= 0 or len(values) < period:
+        return []
+    try:
+        multiplier = 2 / (period + 1)
+        ema_seed = sum(values[:period]) / period
+        ema_values = [ema_seed]
+        for v in values[period:]:
+            ema_values.append((v - ema_values[-1]) * multiplier + ema_values[-1])
+        return ema_values
+    except Exception:
+        return []
+
+
+def calculate_rsi(values: List[float], period: int = 14) -> float:
+    """Compute RSI from close prices; returns 50 on insufficient data."""
+    if len(values) < period + 1:
+        return 50.0
+    gains = []
+    losses = []
+    for i in range(1, len(values)):
+        delta = values[i] - values[i - 1]
+        gains.append(max(delta, 0.0))
+        losses.append(abs(min(delta, 0.0)))
+    if len(gains) < period:
+        return 50.0
+    avg_gain = sum(gains[-period:]) / period
+    avg_loss = sum(losses[-period:]) / period
+    if avg_loss == 0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return 100.0 - (100.0 / (1.0 + rs))
+
+
 class SymbolSelectorAgent:
     """
     Automated symbol selection based on backtest performance (AUTO3)
@@ -141,6 +176,10 @@ class SymbolSelectorAgent:
     AUTO1_INTERVAL = "1m"
     AUTO1_VOLUME_RATIO_THRESHOLD = 1.2
     AUTO1_MIN_ADX = 20  # 最小 ADX 要求（>20 = 有趋势，<20 = 震荡）
+    AUTO1_CANDIDATE_TOP_N = 15
+    AUTO1_MIN_DIRECTIONAL_SCORE = 2.0
+    AUTO1_MIN_ALIGNMENT_SCORE = 0.0
+    AUTO1_RELAX_FACTOR = 0.75
     DEFAULT_MIN_QUOTE_VOL = 5_000_000  # 24h USDT quote volume
     DEFAULT_MIN_PRICE = 0.05  # Minimum last price to avoid ultra-low price coins
     DEFAULT_MIN_QUOTE_VOL_PER_USDT = 3000  # Dynamic volume floor per 1 USDT equity
@@ -187,6 +226,90 @@ class SymbolSelectorAgent:
             f"🔝 SymbolSelectorAgent initialized: AUTO3 backtest ({refresh_interval_hours}h refresh) + AUTO1 momentum"
         )
 
+    def _compute_directional_consistency(self, closes: List[float], direction: int) -> float:
+        """Return how consistently bars moved in the target direction (0~1)."""
+        if direction == 0 or len(closes) < 3:
+            return 0.5
+        directional_moves = 0
+        opposite_moves = 0
+        for i in range(1, len(closes)):
+            delta = closes[i] - closes[i - 1]
+            if delta * direction > 0:
+                directional_moves += 1
+            elif delta * direction < 0:
+                opposite_moves += 1
+        total = directional_moves + opposite_moves
+        if total <= 0:
+            return 0.5
+        return directional_moves / total
+
+    def _compute_timeframe_alignment(self, closes: List[float], direction: int) -> float:
+        """Estimate directional alignment on one timeframe using EMA20/EMA60 and slope."""
+        if direction == 0 or len(closes) < 65:
+            return 0.0
+
+        ema20 = calculate_ema(closes, 20)
+        ema60 = calculate_ema(closes, 60)
+        if not ema20 or not ema60:
+            return 0.0
+
+        ema20_now = ema20[-1]
+        ema60_now = ema60[-1]
+        ema20_prev = ema20[-4] if len(ema20) >= 4 else ema20[0]
+        ema60_prev = ema60[-4] if len(ema60) >= 4 else ema60[0]
+
+        trend_diff = ema20_now - ema60_now
+        slope20 = ema20_now - ema20_prev
+        slope60 = ema60_now - ema60_prev
+
+        score = 0.0
+        if trend_diff * direction > 0:
+            score += 0.65
+        elif trend_diff * direction < 0:
+            score -= 0.65
+
+        if slope20 * direction > 0:
+            score += 0.25
+        elif slope20 * direction < 0:
+            score -= 0.25
+
+        if slope60 * direction > 0:
+            score += 0.10
+        elif slope60 * direction < 0:
+            score -= 0.10
+
+        return max(-1.0, min(1.0, score))
+
+    def _build_directional_score(
+        self,
+        change_pct: float,
+        volume_ratio: float,
+        adx_15m: float,
+        adx_1h: float,
+        consistency: float,
+        alignment_score: float,
+        day_change_pct: float = 0.0
+    ) -> float:
+        """Composite directional score: movement × volume × trend quality."""
+        magnitude = abs(change_pct)
+        adx_ref = max(adx_15m, adx_1h)
+        adx_boost = 1.0 + max(0.0, adx_ref - 18.0) / 40.0
+        vol_boost = 1.0 + max(0.0, min(volume_ratio, 4.0) - 1.0) * 0.7
+        consistency_boost = 0.8 + max(0.0, min(1.0, consistency)) * 0.6
+        alignment_boost = 0.6 + max(0.0, alignment_score) * 0.8
+
+        if change_pct * day_change_pct > 0:
+            day_boost = 1.15
+        elif change_pct * day_change_pct < 0:
+            day_boost = 0.9
+        else:
+            day_boost = 1.0
+
+        score = magnitude * adx_boost * vol_boost * consistency_boost * alignment_boost * day_boost
+        if alignment_score < -0.3:
+            score *= 0.45
+        return score
+
     def _interval_to_minutes(self, interval: str) -> int:
         if not interval:
             return 1
@@ -226,6 +349,11 @@ class SymbolSelectorAgent:
         interval: str = AUTO1_INTERVAL,
         threshold_pct: float = AUTO1_THRESHOLD_PCT,
         volume_ratio_threshold: float = AUTO1_VOLUME_RATIO_THRESHOLD,
+        min_adx: Optional[float] = None,
+        candidate_top_n: int = AUTO1_CANDIDATE_TOP_N,
+        min_directional_score: float = AUTO1_MIN_DIRECTIONAL_SCORE,
+        min_alignment_score: float = AUTO1_MIN_ALIGNMENT_SCORE,
+        relax_factor: float = AUTO1_RELAX_FACTOR,
         account_equity: Optional[float] = None
     ) -> List[str]:
         """
@@ -241,11 +369,32 @@ class SymbolSelectorAgent:
             log.error(f"❌ AUTO1 failed: BinanceClient unavailable: {e}")
             return [self.FALLBACK_SYMBOLS[0]]
 
+        try:
+            min_adx_value = float(self.AUTO1_MIN_ADX if min_adx is None else min_adx)
+        except (TypeError, ValueError):
+            min_adx_value = float(self.AUTO1_MIN_ADX)
+        try:
+            top_n = max(5, int(candidate_top_n))
+        except (TypeError, ValueError):
+            top_n = self.AUTO1_CANDIDATE_TOP_N
+        try:
+            min_score = max(0.0, float(min_directional_score))
+        except (TypeError, ValueError):
+            min_score = self.AUTO1_MIN_DIRECTIONAL_SCORE
+        try:
+            min_align = max(-1.0, min(1.0, float(min_alignment_score)))
+        except (TypeError, ValueError):
+            min_align = self.AUTO1_MIN_ALIGNMENT_SCORE
+        try:
+            relax = max(0.5, min(1.0, float(relax_factor)))
+        except (TypeError, ValueError):
+            relax = self.AUTO1_RELAX_FACTOR
+
         effective_min_quote_volume = self._get_effective_min_quote_volume(account_equity)
         if account_equity is not None:
             self.account_equity = float(account_equity)
 
-        symbols = candidates or await self._get_expanded_candidates(account_equity=account_equity)
+        symbols = candidates or await self._get_expanded_candidates(account_equity=account_equity, top_n=top_n)
         if self.symbol_blacklist:
             symbols = [s for s in symbols if s.upper() not in self.symbol_blacklist]
         if not symbols:
@@ -253,7 +402,7 @@ class SymbolSelectorAgent:
 
         interval_minutes = self._interval_to_minutes(interval)
         window_count = max(2, int(window_minutes / interval_minutes))
-        limit = max(4, window_count * 2)
+        limit = max(8, window_count * 3)
         client = BinanceClient()
         ticker_map = {}
         if effective_min_quote_volume > 0 or self.min_price > 0:
@@ -264,7 +413,7 @@ class SymbolSelectorAgent:
                 ticker_map = {}
 
         results = []
-        skipped_low_adx = []  # 记录因 ADX 低而跳过的币种
+        low_trend_symbols = []
         for symbol in symbols:
             try:
                 if ticker_map:
@@ -289,56 +438,128 @@ class SymbolSelectorAgent:
                 prev_volume = sum(k.get('volume', 0.0) for k in previous) if previous else 0.0
                 volume_ratio = (recent_volume / prev_volume) if prev_volume > 0 else 1.0
                 
-                # 🆕 获取 1h K线计算 ADX 趋势强度
+                day_change_pct = 0.0
+                if ticker_map and ticker_map.get(symbol):
+                    try:
+                        day_change_pct = float(ticker_map[symbol].get('priceChangePercent', 0) or 0)
+                    except (TypeError, ValueError):
+                        day_change_pct = 0.0
+
+                # 15m + 1h 趋势强度与方向一致性
                 try:
-                    klines_1h = client.get_klines(symbol, "1h", limit=50)
-                    adx = calculate_adx(klines_1h, period=14)
+                    klines_15m = client.get_klines(symbol, "15m", limit=80)
+                    klines_1h = client.get_klines(symbol, "1h", limit=80)
+                    adx_15m = calculate_adx(klines_15m, period=14)
+                    adx_1h = calculate_adx(klines_1h, period=14)
                 except Exception:
-                    adx = 0.0
-                
-                # 🆕 过滤无趋势币种 (ADX < 20)
-                if adx < self.AUTO1_MIN_ADX:
-                    skipped_low_adx.append(f"{symbol}(ADX={adx:.0f})")
-                    continue
-                
-                # 🆕 ADX 增强评分: 动量 × 成交量 × ADX增强因子
-                adx_boost = 1.0 + max(0, (adx - 20)) / 50  # ADX=20→1.0, ADX=50→1.6
-                score = abs(change_pct) * volume_ratio * adx_boost
-                
+                    klines_15m = []
+                    klines_1h = []
+                    adx_15m = 0.0
+                    adx_1h = 0.0
+
+                direction = 1 if change_pct > 0 else (-1 if change_pct < 0 else 0)
+                recent_closes = [float(k.get("close", 0.0) or 0.0) for k in recent]
+                consistency = self._compute_directional_consistency(recent_closes, direction)
+
+                closes_15m = [float(k.get("close", 0.0) or 0.0) for k in klines_15m]
+                closes_1h = [float(k.get("close", 0.0) or 0.0) for k in klines_1h]
+                alignment_15m = self._compute_timeframe_alignment(closes_15m, direction)
+                alignment_1h = self._compute_timeframe_alignment(closes_1h, direction)
+                alignment_score = alignment_15m * 0.4 + alignment_1h * 0.6
+                rsi_15m = calculate_rsi(closes_15m, period=14)
+
+                adx_ref = max(adx_15m, adx_1h)
+                low_trend = adx_ref < min_adx_value
+                if low_trend:
+                    low_trend_symbols.append(f"{symbol}(ADX={adx_ref:.0f})")
+
+                score = self._build_directional_score(
+                    change_pct=change_pct,
+                    volume_ratio=volume_ratio,
+                    adx_15m=adx_15m,
+                    adx_1h=adx_1h,
+                    consistency=consistency,
+                    alignment_score=alignment_score,
+                    day_change_pct=day_change_pct
+                )
+                exhausted = False
+                if direction > 0 and rsi_15m >= 72:
+                    exhausted = True
+                    score *= 0.55
+                elif direction < 0 and rsi_15m <= 28:
+                    exhausted = True
+                    score *= 0.55
+                if low_trend:
+                    score *= 0.55
+
                 results.append({
                     "symbol": symbol,
                     "change_pct": change_pct,
                     "volume_ratio": volume_ratio,
-                    "adx": adx,
-                    "score": score
+                    "adx": adx_ref,
+                    "adx_15m": adx_15m,
+                    "adx_1h": adx_1h,
+                    "day_change_pct": day_change_pct,
+                    "consistency": consistency,
+                    "alignment_score": alignment_score,
+                    "rsi_15m": rsi_15m,
+                    "score": score,
+                    "low_trend": low_trend,
+                    "exhausted": exhausted
                 })
             except Exception as e:
                 log.warning(f"⚠️ AUTO1 skip {symbol}: {e}")
         
-        # 🆕 记录被 ADX 过滤的币种
-        if skipped_low_adx:
-            log.info(f"📊 AUTO1 跳过低趋势币种 (ADX<{self.AUTO1_MIN_ADX}): {', '.join(skipped_low_adx[:5])}{'...' if len(skipped_low_adx) > 5 else ''}")
+        if low_trend_symbols:
+            log.info(f"📊 AUTO1 低趋势候选 (ADX<{min_adx_value:.0f}, 已降权): {', '.join(low_trend_symbols[:5])}{'...' if len(low_trend_symbols) > 5 else ''}")
 
         if not results:
             fallback = symbols[0] if symbols else self.FALLBACK_SYMBOLS[0]
             log.warning(f"⚠️ AUTO1 empty results, fallback to {fallback}")
             return [fallback]
 
-        best_up = max(results, key=lambda x: x["change_pct"])
-        best_down = min(results, key=lambda x: x["change_pct"])
+        ups = [r for r in results if r["change_pct"] > 0]
+        downs = [r for r in results if r["change_pct"] < 0]
+        best_up = max(ups, key=lambda x: x["score"]) if ups else max(results, key=lambda x: x["score"])
+        best_down = max(downs, key=lambda x: x["score"]) if downs else min(results, key=lambda x: x["change_pct"])
 
         strong_ups = [
             r for r in results
             if r["change_pct"] > 0
             and abs(r["change_pct"]) >= threshold_pct
             and r["volume_ratio"] >= volume_ratio_threshold
+            and r["score"] >= min_score
+            and r["alignment_score"] >= min_align
+            and not r.get("exhausted", False)
         ]
         strong_downs = [
             r for r in results
             if r["change_pct"] < 0
             and abs(r["change_pct"]) >= threshold_pct
             and r["volume_ratio"] >= volume_ratio_threshold
+            and r["score"] >= min_score
+            and r["alignment_score"] >= min_align
+            and not r.get("exhausted", False)
         ]
+
+        if not strong_ups:
+            strong_ups = [
+                r for r in results
+                if r["change_pct"] > 0
+                and abs(r["change_pct"]) >= threshold_pct * relax
+                and r["volume_ratio"] >= max(1.0, volume_ratio_threshold * relax)
+                and r["score"] >= min_score * relax
+                and r["alignment_score"] >= min_align - (1.0 - relax)
+            ]
+        if not strong_downs:
+            strong_downs = [
+                r for r in results
+                if r["change_pct"] < 0
+                and abs(r["change_pct"]) >= threshold_pct * relax
+                and r["volume_ratio"] >= max(1.0, volume_ratio_threshold * relax)
+                and r["score"] >= min_score * relax
+                and r["alignment_score"] >= min_align - (1.0 - relax)
+            ]
 
         if strong_ups:
             best_up = max(strong_ups, key=lambda x: x["score"])
@@ -346,14 +567,31 @@ class SymbolSelectorAgent:
             best_down = max(strong_downs, key=lambda x: x["score"])
 
         selected = []
-        if best_up["change_pct"] > 0:
+        min_select_score = min_score * relax
+        min_select_align = min_align - (1.0 - relax)
+        up_qualified = (
+            best_up.get("change_pct", 0) > 0
+            and best_up.get("score", 0) >= min_select_score
+            and best_up.get("alignment_score", 0) >= min_select_align
+        )
+        down_qualified = (
+            best_down.get("change_pct", 0) < 0
+            and best_down.get("score", 0) >= min_select_score
+            and best_down.get("alignment_score", 0) >= min_select_align
+        )
+
+        if up_qualified:
             selected.append(best_up["symbol"])
-        if best_down["change_pct"] < 0 and best_down["symbol"] not in selected:
+        if down_qualified and best_down["symbol"] not in selected:
             selected.append(best_down["symbol"])
 
         if not selected:
-            results.sort(key=lambda x: abs(x["change_pct"]), reverse=True)
+            results.sort(key=lambda x: x.get("score", 0), reverse=True)
             best = results[0]
+            log.info(
+                f"ℹ️ AUTO1 fallback to strongest directional score: {best['symbol']} "
+                f"(chg {best['change_pct']:+.2f}% | score {best['score']:.2f} | align {best.get('alignment_score', 0):+.2f})"
+            )
             selected.append(best["symbol"])
 
         def log_selection(label: str, entry: Dict[str, float], strong: bool) -> None:
@@ -361,30 +599,43 @@ class SymbolSelectorAgent:
             direction = "UP" if entry["change_pct"] >= 0 else "DOWN"
             vol_ratio = entry.get("volume_ratio", 1.0)
             adx_val = entry.get("adx", 0)
+            align_val = entry.get("alignment_score", 0.0)
+            consistency = entry.get("consistency", 0.5)
+            rsi_15m = entry.get("rsi_15m", 50.0)
             vol_text = f"VOL x{vol_ratio:.2f}"
             adx_text = f"ADX={adx_val:.0f}"
+            align_text = f"ALIGN={align_val:+.2f}"
+            consistency_text = f"CONS={consistency:.2f}"
+            rsi_text = f"RSI15={rsi_15m:.0f}"
             if strong:
                 log.info(
-                    f"🎯 AUTO1 {label}: {entry['symbol']} ({direction} {entry['change_pct']:+.2f}% | {vol_text} | {adx_text})"
+                    f"🎯 AUTO1 {label}: {entry['symbol']} ({direction} {entry['change_pct']:+.2f}% | {vol_text} | {adx_text} | {align_text} | {consistency_text} | {rsi_text} | SCORE={entry['score']:.2f})"
                 )
             else:
                 log.info(
                     f"ℹ️ AUTO1 {label} weak (<{threshold_pct:.2f}% or VOL<{volume_ratio_threshold:.2f}x): "
-                    f"{entry['symbol']} ({direction} {entry['change_pct']:+.2f}% | {vol_text} | {adx_text})"
+                    f"{entry['symbol']} ({direction} {entry['change_pct']:+.2f}% | {vol_text} | {adx_text} | {align_text} | {consistency_text} | {rsi_text} | SCORE={entry['score']:.2f})"
                 )
 
         if best_up["symbol"] in selected:
             is_strong = best_up in strong_ups
-            log_selection("UP", best_up, is_strong)
+            up_label = "UP" if best_up.get("change_pct", 0) >= 0 else "DOWN"
+            log_selection(up_label, best_up, is_strong)
         if best_down["symbol"] in selected and best_down["symbol"] != best_up["symbol"]:
             is_strong = best_down in strong_downs
-            log_selection("DOWN", best_down, is_strong)
+            down_label = "DOWN" if best_down.get("change_pct", 0) <= 0 else "UP"
+            log_selection(down_label, best_down, is_strong)
 
         self.last_auto1 = {
             "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
             "window_minutes": window_minutes,
             "threshold_pct": threshold_pct,
             "volume_ratio_threshold": volume_ratio_threshold,
+            "min_adx": min_adx_value,
+            "min_directional_score": min_score,
+            "min_alignment_score": min_align,
+            "relax_factor": relax,
+            "candidate_top_n": top_n,
             "selected": list(selected),
             "results": {entry["symbol"]: dict(entry) for entry in results}
         }
@@ -484,7 +735,7 @@ class SymbolSelectorAgent:
             log.warning(f"⚠️ Falling back to default symbols: {self.FALLBACK_SYMBOLS}")
             return self.FALLBACK_SYMBOLS
     
-    async def _get_expanded_candidates(self, account_equity: Optional[float] = None) -> List[str]:
+    async def _get_expanded_candidates(self, account_equity: Optional[float] = None, top_n: int = 10) -> List[str]:
         """Get AI500 Top 10 by 24h volume"""
         try:
             from src.api.binance_client import BinanceClient
@@ -518,13 +769,14 @@ class SymbolSelectorAgent:
             
             # Sort by volume descending and get Top 10
             ai_stats.sort(key=lambda x: x[1], reverse=True)
-            ai500_top10 = [x[0] for x in ai_stats[:10]]
+            top_n = max(3, int(top_n))
+            ai500_top10 = [x[0] for x in ai_stats[:top_n]]
             
             if skipped_blacklist:
                 log.warning(f"🚫 AI500 blacklist excluded: {', '.join(skipped_blacklist)}")
             if skipped_liquidity:
                 log.warning(f"⚠️ AI500 liquidity filter excluded: {', '.join(skipped_liquidity[:6])}{'...' if len(skipped_liquidity) > 6 else ''}")
-            log.info(f"📊 AI500 Top 10 (filtered): {ai500_top10}")
+            log.info(f"📊 AI500 Top {top_n} (filtered): {ai500_top10}")
             
             return ai500_top10
             

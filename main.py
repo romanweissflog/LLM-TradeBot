@@ -543,6 +543,95 @@ class MultiAgentTradingBot:
             # Refresh LLM metadata in case config changed
             self._update_llm_metadata()
 
+    def _get_agent_setting_params(self, agent_key: str) -> Dict[str, Any]:
+        """Load agent params from shared runtime state; fallback to config/agent_settings.json."""
+        settings = getattr(global_state, "agent_settings", None) or {}
+        agents = settings.get("agents", {}) if isinstance(settings, dict) else {}
+        if isinstance(agents, dict):
+            node = agents.get(agent_key, {})
+            if isinstance(node, dict):
+                params = node.get("params", {})
+                if isinstance(params, dict):
+                    return dict(params)
+
+        settings_path = os.path.join(os.path.dirname(__file__), "config", "agent_settings.json")
+        try:
+            with open(settings_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                global_state.agent_settings = data
+                node = (data.get("agents", {}) or {}).get(agent_key, {})
+                if isinstance(node, dict):
+                    params = node.get("params", {})
+                    if isinstance(params, dict):
+                        return dict(params)
+        except Exception:
+            pass
+        return {}
+
+    def _resolve_symbol_selector_params(self, selector: Any) -> Dict[str, Any]:
+        """Resolve symbol-selector params from runtime settings with safe defaults."""
+        params = self._get_agent_setting_params("symbol_selector")
+
+        def _num(name: str, default: float) -> float:
+            try:
+                return float(params.get(name, default))
+            except (TypeError, ValueError):
+                return float(default)
+
+        def _int(name: str, default: int, lower: int = 1) -> int:
+            try:
+                return max(lower, int(params.get(name, default)))
+            except (TypeError, ValueError):
+                return max(lower, int(default))
+
+        interval = str(params.get("auto1_interval", getattr(selector, "AUTO1_INTERVAL", "1m")) or "1m")
+        return {
+            "refresh_interval_hours": _int("refresh_interval_hours", int(getattr(selector, "refresh_interval", 6))),
+            "lookback_hours": _int("lookback_hours", int(getattr(selector, "lookback_hours", 24))),
+            "auto1_window_minutes": _int("auto1_window_minutes", int(getattr(selector, "AUTO1_WINDOW_MINUTES", 30))),
+            "auto1_threshold_pct": _num("auto1_threshold_pct", float(getattr(selector, "AUTO1_THRESHOLD_PCT", 0.8))),
+            "auto1_interval": interval,
+            "auto1_volume_ratio_threshold": _num(
+                "auto1_volume_ratio_threshold",
+                float(getattr(selector, "AUTO1_VOLUME_RATIO_THRESHOLD", 1.2))
+            ),
+            "auto1_min_adx": _num("auto1_min_adx", float(getattr(selector, "AUTO1_MIN_ADX", 20))),
+            "auto1_candidate_top_n": _int(
+                "auto1_candidate_top_n",
+                int(getattr(selector, "AUTO1_CANDIDATE_TOP_N", 15)),
+                lower=3
+            ),
+            "auto1_min_directional_score": _num(
+                "auto1_min_directional_score",
+                float(getattr(selector, "AUTO1_MIN_DIRECTIONAL_SCORE", 2.0))
+            ),
+            "auto1_min_alignment_score": _num(
+                "auto1_min_alignment_score",
+                float(getattr(selector, "AUTO1_MIN_ALIGNMENT_SCORE", 0.0))
+            ),
+            "auto1_relax_factor": _num(
+                "auto1_relax_factor",
+                float(getattr(selector, "AUTO1_RELAX_FACTOR", 0.75))
+            ),
+            "min_quote_volume": _num("min_quote_volume", float(getattr(selector, "min_quote_volume", 5_000_000))),
+            "min_price": _num("min_price", float(getattr(selector, "min_price", 0.05))),
+            "min_quote_volume_per_usdt": _num(
+                "min_quote_volume_per_usdt",
+                float(getattr(selector, "min_quote_volume_per_usdt", 3000))
+            )
+        }
+
+    def _apply_symbol_selector_runtime_params(self, selector: Any, selector_params: Dict[str, Any]) -> None:
+        """Apply selector params immediately so dashboard tuning takes effect in-cycle."""
+        selector.refresh_interval = int(selector_params.get("refresh_interval_hours", selector.refresh_interval))
+        selector.lookback_hours = int(selector_params.get("lookback_hours", selector.lookback_hours))
+        selector.min_quote_volume = float(selector_params.get("min_quote_volume", selector.min_quote_volume))
+        selector.min_price = float(selector_params.get("min_price", selector.min_price))
+        selector.min_quote_volume_per_usdt = float(
+            selector_params.get("min_quote_volume_per_usdt", selector.min_quote_volume_per_usdt)
+        )
+
     def _run_symbol_selector(self, reason: str = "scheduled") -> None:
         """Run symbol selector and update symbols (AUTO1/AUTO3)."""
         if not self.agent_config.symbol_selector_agent:
@@ -569,6 +658,8 @@ class MultiAgentTradingBot:
             log.info(f"🎰 SymbolSelectorAgent ({reason}) running before analysis...")
             global_state.add_log(f"[🎰 SELECTOR] Symbol selection started ({reason})")
             selector = get_selector()
+            selector_params = self._resolve_symbol_selector_params(selector)
+            self._apply_symbol_selector_runtime_params(selector, selector_params)
             account_equity = self._get_account_equity_estimate()
             if hasattr(selector, 'account_equity') and account_equity:
                 selector.account_equity = account_equity
@@ -576,7 +667,26 @@ class MultiAgentTradingBot:
                 top_symbols = asyncio.run(selector.select_top3(force_refresh=False, account_equity=account_equity))
             else:
                 top_symbols = asyncio.run(
-                    selector.select_auto1_recent_momentum(account_equity=account_equity)
+                    selector.select_auto1_recent_momentum(
+                        account_equity=account_equity,
+                        window_minutes=int(selector_params.get("auto1_window_minutes", selector.AUTO1_WINDOW_MINUTES)),
+                        interval=str(selector_params.get("auto1_interval", selector.AUTO1_INTERVAL)),
+                        threshold_pct=float(selector_params.get("auto1_threshold_pct", selector.AUTO1_THRESHOLD_PCT)),
+                        volume_ratio_threshold=float(
+                            selector_params.get("auto1_volume_ratio_threshold", selector.AUTO1_VOLUME_RATIO_THRESHOLD)
+                        ),
+                        min_adx=float(selector_params.get("auto1_min_adx", selector.AUTO1_MIN_ADX)),
+                        candidate_top_n=int(
+                            selector_params.get("auto1_candidate_top_n", selector.AUTO1_CANDIDATE_TOP_N)
+                        ),
+                        min_directional_score=float(
+                            selector_params.get("auto1_min_directional_score", selector.AUTO1_MIN_DIRECTIONAL_SCORE)
+                        ),
+                        min_alignment_score=float(
+                            selector_params.get("auto1_min_alignment_score", selector.AUTO1_MIN_ALIGNMENT_SCORE)
+                        ),
+                        relax_factor=float(selector_params.get("auto1_relax_factor", selector.AUTO1_RELAX_FACTOR))
+                    )
                 ) or []
 
             if top_symbols:
@@ -612,7 +722,14 @@ class MultiAgentTradingBot:
                     score = metrics.get("score")
                     if isinstance(score, (int, float)):
                         selector_payload["score"] = score
+                    adx = metrics.get("adx")
+                    if isinstance(adx, (int, float)):
+                        selector_payload["adx"] = adx
+                    alignment_score = metrics.get("alignment_score")
+                    if isinstance(alignment_score, (int, float)):
+                        selector_payload["alignment_score"] = alignment_score
                     selector_payload["window_minutes"] = auto1.get("window_minutes")
+                    selector_payload["threshold_pct"] = auto1.get("threshold_pct")
                 global_state.symbol_selector = selector_payload
                 if self.primary_symbol not in self.symbols:
                     self.primary_symbol = self.current_symbol
@@ -1602,6 +1719,45 @@ class MultiAgentTradingBot:
                     predict_result=predict_result,
                     market_data=market_data
                 )
+                four_layer = getattr(global_state, 'four_layer_result', {}) or {}
+                final_action = str(four_layer.get('final_action', 'wait') or 'wait').lower()
+                layers_passed = bool(
+                    four_layer.get('layer1_pass')
+                    and four_layer.get('layer2_pass')
+                    and four_layer.get('layer3_pass')
+                    and four_layer.get('layer4_pass')
+                )
+                has_position = False
+                if current_position_info:
+                    try:
+                        has_position = abs(float(current_position_info.get('quantity', 0) or 0)) > 0
+                    except (TypeError, ValueError):
+                        has_position = True
+
+                if (
+                    not has_position
+                    and vote_core.action in ('wait', 'hold')
+                    and layers_passed
+                    and final_action in ('long', 'short')
+                ):
+                    override_action = 'open_long' if final_action == 'long' else 'open_short'
+                    try:
+                        boost = float(four_layer.get('confidence_boost', 0) or 0)
+                    except (TypeError, ValueError):
+                        boost = 0.0
+                    override_conf = min(85.0, max(60.0, 60.0 + max(0.0, boost)))
+                    vote_core.action = override_action
+                    vote_core.confidence = max(float(vote_core.confidence or 0), override_conf)
+                    base_reason = str(vote_core.reason or "DecisionCore wait")
+                    vote_core.reason = f"{base_reason} | 4-Layer override: {override_action} (layers all pass)"
+                    if not isinstance(vote_core.vote_details, dict):
+                        vote_core.vote_details = {}
+                    vote_core.vote_details['four_layer_override'] = 1.0 if final_action == 'long' else -1.0
+                    log.info(
+                        f"⚡ Decision override applied: {override_action} "
+                        f"(confidence {vote_core.confidence:.1f}%, trigger={four_layer.get('trigger_pattern', 'unknown')})"
+                    )
+
                 size_pct = 0.0
                 if vote_core.trade_params and self.max_position_size:
                     size_pct = min(
@@ -1757,6 +1913,22 @@ class MultiAgentTradingBot:
             'trend_15m_score': trend_data.get('trend_15m_score', 0),
             'trend_5m_score': trend_data.get('trend_5m_score', 0)
         }
+        four_layer = getattr(global_state, 'four_layer_result', {}) or {}
+        if isinstance(four_layer, dict):
+            order_params['four_layer'] = {
+                'layer1_pass': bool(four_layer.get('layer1_pass')),
+                'layer2_pass': bool(four_layer.get('layer2_pass')),
+                'layer3_pass': bool(four_layer.get('layer3_pass')),
+                'layer4_pass': bool(four_layer.get('layer4_pass')),
+                'final_action': four_layer.get('final_action', 'wait'),
+                'trigger_pattern': four_layer.get('trigger_pattern'),
+                'setup_quality': four_layer.get('setup_quality'),
+                'setup_override': four_layer.get('setup_override'),
+                'trend_continuation_mode': bool(four_layer.get('trend_continuation_mode')),
+                'adx': four_layer.get('adx'),
+                'oi_change': four_layer.get('oi_change'),
+                'trigger_rvol': four_layer.get('trigger_rvol'),
+            }
 
         try:
             if self.agent_config.position_analyzer_agent:
@@ -2520,6 +2692,19 @@ class MultiAgentTradingBot:
         oi_divergence_warning = None
         oi_divergence_warn = 15.0
         oi_divergence_block = 60.0
+        trend_scores = quant_analysis.get('trend', {}) if isinstance(quant_analysis, dict) else {}
+        t_1h = float(trend_scores.get('trend_1h_score', 0) or 0)
+        t_15m = float(trend_scores.get('trend_15m_score', 0) or 0)
+        t_5m = float(trend_scores.get('trend_5m_score', 0) or 0)
+        strong_trend_alignment = (
+            (trend_1h == 'long' and t_1h >= 40 and t_15m >= 20 and t_5m >= 10)
+            or
+            (trend_1h == 'short' and t_1h <= -40 and t_15m <= -20 and t_5m <= -10)
+        )
+        if strong_trend_alignment and adx_value >= 28:
+            oi_divergence_warn = 25.0
+            oi_divergence_block = 100.0
+            four_layer_result['trend_continuation_mode'] = True
 
         if trend_1h == 'neutral':
             four_layer_result['blocking_reason'] = 'No clear 1h trend (EMA 20/60)'
@@ -2626,9 +2811,17 @@ class MultiAgentTradingBot:
 
                     if trend_1h == 'long':
                         if close_15m > bb_upper or kdj_j > 80:
-                            setup_ready = False
-                            four_layer_result['blocking_reason'] = f"15m overbought (J={kdj_j:.0f}) - wait for pullback"
-                            log.info("⏳ Layer 3 WAIT: Overbought - waiting for pullback")
+                            if strong_trend_alignment and adx_value >= 30 and kdj_j <= 88 and abs(oi_change) >= 2:
+                                setup_ready = True
+                                four_layer_result['setup_quality'] = 'MOMENTUM_CONTINUATION'
+                                four_layer_result['setup_override'] = 'overbought_but_strong_trend'
+                                log.info(
+                                    f"⚡ Layer 3 OVERRIDE: Overbought but strong trend continuation (ADX={adx_value:.0f}, J={kdj_j:.0f})"
+                                )
+                            else:
+                                setup_ready = False
+                                four_layer_result['blocking_reason'] = f"15m overbought (J={kdj_j:.0f}) - wait for pullback"
+                                log.info("⏳ Layer 3 WAIT: Overbought - waiting for pullback")
                         elif close_15m < bb_middle or kdj_j < 50:
                             setup_ready = True
                             four_layer_result['setup_quality'] = 'IDEAL'
@@ -2639,9 +2832,17 @@ class MultiAgentTradingBot:
                             log.info(f"✅ Layer 3 READY: Acceptable mid-range entry (J={kdj_j:.0f})")
                     elif trend_1h == 'short':
                         if close_15m < bb_lower or kdj_j < 20:
-                            setup_ready = False
-                            four_layer_result['blocking_reason'] = f"15m oversold (J={kdj_j:.0f}) - wait for rally"
-                            log.info("⏳ Layer 3 WAIT: Oversold - waiting for rally")
+                            if strong_trend_alignment and adx_value >= 30 and kdj_j >= 12 and abs(oi_change) >= 2:
+                                setup_ready = True
+                                four_layer_result['setup_quality'] = 'MOMENTUM_CONTINUATION'
+                                four_layer_result['setup_override'] = 'oversold_but_strong_trend'
+                                log.info(
+                                    f"⚡ Layer 3 OVERRIDE: Oversold but strong trend continuation (ADX={adx_value:.0f}, J={kdj_j:.0f})"
+                                )
+                            else:
+                                setup_ready = False
+                                four_layer_result['blocking_reason'] = f"15m oversold (J={kdj_j:.0f}) - wait for rally"
+                                log.info("⏳ Layer 3 WAIT: Oversold - waiting for rally")
                         elif close_15m > bb_middle or kdj_j > 50:
                             setup_ready = True
                             four_layer_result['setup_quality'] = 'IDEAL'
@@ -2654,7 +2855,8 @@ class MultiAgentTradingBot:
                         setup_ready = False
 
                 if not setup_ready:
-                    four_layer_result['blocking_reason'] = "15m setup not ready"
+                    if not four_layer_result.get('blocking_reason'):
+                        four_layer_result['blocking_reason'] = "15m setup not ready"
                     log.info("⏳ Layer 3 WAIT: 15m setup not ready")
                 else:
                     four_layer_result['layer3_pass'] = True
@@ -2677,8 +2879,36 @@ class MultiAgentTradingBot:
                             four_layer_result['data_anomalies'].append(f"Low Volume (RVOL {rvol:.1f}x)")
 
                         if not trigger_result['triggered']:
-                            four_layer_result['blocking_reason'] = f"5min trigger not confirmed (RVOL={trigger_result.get('rvol', 1.0):.1f}x)"
-                            log.info(f"⏳ Layer 4 WAIT: No engulfing or breakout pattern (RVOL={trigger_result.get('rvol', 1.0):.1f}x)")
+                            soft_trigger = False
+                            try:
+                                curr5 = df_5m.iloc[-1]
+                                momentum_bar_ok = (
+                                    (trend_1h == 'long' and curr5['close'] > curr5['open'])
+                                    or (trend_1h == 'short' and curr5['close'] < curr5['open'])
+                                )
+                                soft_trigger = bool(
+                                    strong_trend_alignment
+                                    and adx_value >= 26
+                                    and trigger_result.get('rvol', 1.0) >= 0.6
+                                    and momentum_bar_ok
+                                )
+                            except Exception:
+                                soft_trigger = False
+
+                            if soft_trigger:
+                                four_layer_result['layer4_pass'] = True
+                                four_layer_result['final_action'] = trend_1h
+                                four_layer_result['trigger_pattern'] = 'soft_momentum'
+                                four_layer_result['confidence_boost'] = max(
+                                    four_layer_result.get('confidence_boost', 0) - 5,
+                                    -10
+                                )
+                                log.info(
+                                    f"⚡ Layer 4 SOFT PASS: strong trend continuation (RVOL={trigger_result.get('rvol', 1.0):.1f}x)"
+                                )
+                            else:
+                                four_layer_result['blocking_reason'] = f"5min trigger not confirmed (RVOL={trigger_result.get('rvol', 1.0):.1f}x)"
+                                log.info(f"⏳ Layer 4 WAIT: No engulfing or breakout pattern (RVOL={trigger_result.get('rvol', 1.0):.1f}x)")
                         else:
                             log.info(f"🎯 Layer 4 TRIGGER: {trigger_result['pattern_type']} detected")
                             sentiment_score = sentiment.get('total_sentiment_score', 0)

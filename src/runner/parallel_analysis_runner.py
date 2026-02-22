@@ -46,7 +46,7 @@ class ParallelAnalysisRunner:
         Run quant/predict/reflection in parallel with timeouts and safe fallbacks.
         """
         async def quant_task():
-            res = await self.agent_provider.quant_analyst.analyze_all_timeframes(market_snapshot)
+            res = await self.agent_provider.quant_analyst_agent.analyze_all_timeframes(market_snapshot)
             trend_score = res.get('trend', {}).get('total_trend_score', 0)
             osc_score = res.get('oscillator', {}).get('total_osc_score', 0)
             sent_score = res.get('sentiment', {}).get('total_sentiment_score', 0)

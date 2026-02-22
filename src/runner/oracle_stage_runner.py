@@ -13,6 +13,7 @@ from src.utils.data_saver import DataSaver
 
 from src.trading.stage_result import StageResult
 from src.trading.symbol_manager import SymbolManager
+from src.trading.result_builder import ResultBuilder
 
 from src.agents.runtime_events import emit_global_runtime_event
 from src.utils.agents_util import get_agent_timeout
@@ -38,6 +39,10 @@ class OracleStageRunner:
         self.symbol_manager = symbol_manager
         self.agent_provider = agent_provider
         self.saver = saver
+        self.result_builder = ResultBuilder(
+            symbol_manager,
+            saver
+        )
         self.kline_limit = kline_limit
         self.test_mode = test_mode
         
@@ -177,7 +182,8 @@ class OracleStageRunner:
                 symbol=self.symbol_manager.current_symbol,
                 data={"status": "warmup"}
             )
-            return StageResult(early_result=self._build_warmup_wait_result(
+            return StageResult(
+                early_result=self.result_builder.build_warmup_wait_result(
                 data_readiness=data_readiness,
                 snapshot_id=snapshot_id,
                 cycle_id=cycle_id

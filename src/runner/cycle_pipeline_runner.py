@@ -1,16 +1,19 @@
 
-from typing import Dict, Any
+from typing import Dict, Any, TYPE_CHECKING
 
 from src.agents.runtime_events import emit_global_runtime_event, emit_cycle_pipeline_end
 
 from src.trading.cycle_context import CycleContext
 from src.trading.symbol_manager import SymbolManager
 
+if TYPE_CHECKING:
+    from .runner_provider import RunnerProvider
+
 class CyclePipelineRunner:
     def __init__(
         self,
         symbol_manager: SymbolManager,
-        runner_provider
+        runner_provider: "RunnerProvider"
     ):
         self.symbol_manager = symbol_manager
         self.runner_provider = runner_provider
@@ -69,7 +72,7 @@ class CyclePipelineRunner:
                 processed_dfs=processed_dfs
             )
 
-            decision_result = await self.runner_provider.decision_stage_runner.run(
+            decision_result = await self.runner_provider.decision_pipeline_stage_runner.run(
                 run_id=context.run_id,
                 cycle_id=context.cycle_id,
                 snapshot_id=context.snapshot_id,

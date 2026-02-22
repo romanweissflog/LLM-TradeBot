@@ -12,6 +12,8 @@ from dataclasses import asdict
 from src.config import Config
 
 from src.strategy.llm_engine import StrategyEngine
+from src.agents import PredictResult
+from src.agents import VoteResult
 from src.api.binance_client import BinanceClient
 from src.execution.engine import ExecutionEngine
 from src.risk.manager import RiskManager
@@ -77,7 +79,7 @@ class MultiAgentTradingBot:
         print("="*80)
         
         self.config = Config()
-        self.client = BinanceClient(test_mode)
+        self.client = BinanceClient(test_mode=test_mode)
 
         self.test_mode = test_mode
         global_state.is_test_mode = test_mode  # Set test mode in global state
@@ -378,276 +380,6 @@ class MultiAgentTradingBot:
 
         self.agent_provider.reload()
 
-    def _attach_agent_ui_fields(self, decision_dict: Dict) -> None:
-        """Attach optional agent fields used by the dashboard."""
-        four_layer = getattr(global_state, 'four_layer_result', {}) or {}
-        ai_check = four_layer.get('ai_check', {}) if isinstance(four_layer, dict) else {}
-        if ai_check:
-            decision_dict['ai_filter_passed'] = not ai_check.get('ai_veto', False)
-            decision_dict['ai_filter_reason'] = ai_check.get('reason')
-            decision_dict['ai_filter_signal'] = ai_check.get('ai_signal')
-            decision_dict['ai_filter_confidence'] = ai_check.get('ai_confidence')
-
-        decision_dict['trigger_pattern'] = four_layer.get('trigger_pattern')
-        decision_dict['trigger_rvol'] = four_layer.get('trigger_rvol')
-
-        position = decision_dict.get('position')
-        if isinstance(position, dict) and position.get('location'):
-            decision_dict['position_zone'] = position.get('location')
-
-        semantic_analyses = getattr(global_state, 'semantic_analyses', None)
-        if semantic_analyses:
-            decision_dict['semantic_analyses'] = semantic_analyses
-
-        reflection_text = getattr(global_state, 'last_reflection_text', None)
-        reflection_count = getattr(global_state, 'reflection_count', 0)
-        trades = getattr(global_state, 'trade_history', []) or []
-        pnl_values = []
-        for trade in trades:
-            if not isinstance(trade, dict):
-                continue
-            pnl = trade.get('pnl', trade.get('realized_pnl'))
-            if pnl is None:
-                continue
-            try:
-                pnl_values.append(float(pnl))
-            except (TypeError, ValueError):
-                continue
-        win_rate = None
-        if pnl_values:
-            wins = sum(1 for v in pnl_values if v > 0)
-            win_rate = (wins / len(pnl_values)) * 100
-        if reflection_text or reflection_count or pnl_values:
-            decision_dict['reflection'] = {
-                'count': reflection_count,
-                'text': reflection_text,
-                'trades': len(pnl_values),
-                'win_rate': win_rate
-            }
-
-        indicator_snapshot = getattr(global_state, 'indicator_snapshot', None)
-        if indicator_snapshot:
-            snapshot = indicator_snapshot
-            if isinstance(indicator_snapshot, dict) and 'ema_status' not in indicator_snapshot:
-                symbol = decision_dict.get('symbol')
-                snapshot = indicator_snapshot.get(symbol) if symbol else None
-            if snapshot:
-                decision_dict['indicator_snapshot'] = snapshot
-
-    def _build_decision_snapshot(
-        self,
-        *,
-        vote_result: Any,
-        quant_analysis: Dict[str, Any],
-        predict_result: Any,
-        risk_level: str,
-        guardian_passed: bool,
-        guardian_reason: Optional[str] = None,
-        action_override: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """Create dashboard-ready decision payload with shared enrichment fields."""
-        decision_dict = asdict(vote_result)
-        if action_override:
-            decision_dict['action'] = action_override
-        decision_dict['symbol'] = self.symbol_manager.current_symbol
-        decision_dict['timestamp'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        decision_dict['cycle_number'] = global_state.cycle_counter
-        decision_dict['cycle_id'] = global_state.current_cycle_id
-        decision_dict['risk_level'] = risk_level
-        decision_dict['guardian_passed'] = guardian_passed
-        if guardian_reason is not None:
-            decision_dict['guardian_reason'] = guardian_reason
-        decision_dict['prophet_probability'] = predict_result.probability_up if predict_result else 0.5
-        decision_dict['vote_analysis'] = SemanticConverter.convert_analysis_map(decision_dict.get('vote_details', {}))
-        decision_dict['four_layer_status'] = global_state.four_layer_result
-        self._attach_agent_ui_fields(decision_dict)
-
-        if 'vote_details' not in decision_dict:
-            decision_dict['vote_details'] = {}
-        decision_dict['vote_details']['oi_fuel'] = quant_analysis.get('sentiment', {}).get('oi_fuel', {})
-
-        kdj_zone = global_state.four_layer_result.get('kdj_zone')
-        if not kdj_zone:
-            bb_position = global_state.four_layer_result.get('bb_position', 'unknown')
-            bb_to_zone_map = {
-                'upper': 'overbought',
-                'lower': 'oversold',
-                'middle': 'neutral',
-                'unknown': 'unknown'
-            }
-            kdj_zone = bb_to_zone_map.get(bb_position, 'unknown')
-        decision_dict['vote_details']['kdj_zone'] = kdj_zone
-
-        if 'regime' in decision_dict and decision_dict['regime']:
-            decision_dict['regime']['adx'] = global_state.four_layer_result.get('adx', 20)
-
-        if vote_result.regime:
-            global_state.market_regime = vote_result.regime.get('regime', 'Unknown')
-        if vote_result.position:
-            pos_pct = min(max(vote_result.position.get('position_pct', 0), 0), 100)
-            global_state.price_position = f"{pos_pct:.1f}% ({vote_result.position.get('location', 'Unknown')})"
-
-        return decision_dict
-
-    def _build_warmup_wait_result(
-        self,
-        *,
-        data_readiness: Dict[str, Any],
-        snapshot_id: str,
-        cycle_id: Optional[str]
-    ) -> Dict[str, Any]:
-        """Create wait result when indicators are still warming up."""
-        reason = data_readiness.get('blocking_reason') or "data_warmup"
-        log.warning(f"[{self.symbol_manager.current_symbol}] {reason}")
-        global_state.add_log(f"[DATA] {reason}")
-        global_state.oracle_status = "Warmup"
-        global_state.guardian_status = "Warmup"
-        global_state.four_layer_result = {
-            'layer1_pass': False,
-            'layer2_pass': False,
-            'layer3_pass': False,
-            'layer4_pass': False,
-            'final_action': 'wait',
-            'blocking_reason': reason,
-            'data_ready': False,
-            'data_validity': data_readiness['details']
-        }
-
-        decision_dict = {
-            'action': 'wait',
-            'confidence': 0,
-            'reason': reason,
-            'vote_details': {
-                'data_validity': data_readiness['details']
-            },
-            'symbol': self.symbol_manager.current_symbol,
-            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            'cycle_number': global_state.cycle_counter,
-            'cycle_id': global_state.current_cycle_id,
-            'risk_level': 'safe',
-            'guardian_passed': True
-        }
-        decision_dict['vote_analysis'] = SemanticConverter.convert_analysis_map(decision_dict.get('vote_details', {}))
-        decision_dict['four_layer_status'] = global_state.four_layer_result
-        self._attach_agent_ui_fields(decision_dict)
-
-        global_state.update_decision(decision_dict)
-        self.saver.save_decision(decision_dict, self.symbol_manager.current_symbol, snapshot_id, cycle_id=cycle_id)
-
-        return {
-            'status': 'wait',
-            'action': 'wait',
-            'details': {
-                'reason': reason,
-                'confidence': 0
-            }
-        }
-
-    def _record_decision_observability(
-        self,
-        *,
-        decision_payload: Dict[str, Any],
-        decision_source: str,
-        vote_result: Any,
-        snapshot_id: str,
-        cycle_id: Optional[str]
-    ) -> None:
-        """Persist LLM logs and emit decision observability logs."""
-        if decision_source == 'llm' and os.environ.get('ENABLE_DETAILED_LLM_LOGS', 'false').lower() == 'true':
-            full_log_content = f"""
-================================================================================
-🕐 Timestamp: {datetime.now().isoformat()}
-💱 Symbol: {self.symbol_manager.current_symbol}
-🔄 Cycle: #{cycle_id}
-================================================================================
-
---------------------------------------------------------------------------------
-📤 INPUT (PROMPT)
---------------------------------------------------------------------------------
-[SYSTEM PROMPT]
-{decision_payload.get('system_prompt', '(Missing System Prompt)')}
-
-[USER PROMPT]
-{decision_payload.get('user_prompt', '(Missing User Prompt)')}
-
---------------------------------------------------------------------------------
-🧠 PROCESSING (REASONING)
---------------------------------------------------------------------------------
-{decision_payload.get('reasoning_detail', '(No reasoning detail)')}
-
---------------------------------------------------------------------------------
-📥 OUTPUT (DECISION)
---------------------------------------------------------------------------------
-{decision_payload.get('raw_response', '(No raw response)')}
-"""
-            self.saver.save_llm_log(
-                content=full_log_content,
-                symbol=self.symbol_manager.current_symbol,
-                snapshot_id=snapshot_id,
-                cycle_id=cycle_id
-            )
-
-        bull_conf = decision_payload.get('bull_perspective', {}).get('bull_confidence', 50)
-        bear_conf = decision_payload.get('bear_perspective', {}).get('bear_confidence', 50)
-        bull_stance = decision_payload.get('bull_perspective', {}).get('stance', 'UNKNOWN')
-        bear_stance = decision_payload.get('bear_perspective', {}).get('stance', 'UNKNOWN')
-        global_state.add_log(f"[🐂 Long Case] [{bull_stance}] Conf={bull_conf}%")
-        global_state.add_log(f"[🐻 Short Case] [{bear_stance}] Conf={bear_conf}%")
-
-        decision_label = "FAST Decision" if decision_source == 'fast_trend' else ("RULE Decision" if decision_source == 'decision_core' else "Final Decision")
-        global_state.add_log(f"[⚖️ {decision_label}] Action={vote_result.action.upper()} | Conf={decision_payload.get('confidence', 0)}%")
-
-        self.saver.save_decision(asdict(vote_result), self.symbol_manager.current_symbol, snapshot_id, cycle_id=cycle_id)
-
-    def _handle_passive_decision(
-        self,
-        *,
-        vote_result: Any,
-        quant_analysis: Dict[str, Any],
-        predict_result: Any,
-        current_position_info: Optional[Dict[str, Any]]
-    ) -> Optional[Dict[str, Any]]:
-        """Handle passive decision (wait/hold). Return cycle result if handled."""
-        if not is_passive_action(vote_result.action):
-            return None
-
-        has_position = False
-        if current_position_info:
-            try:
-                qty = float(current_position_info.get('quantity', 0) or 0)
-                has_position = abs(qty) > 0
-            except (TypeError, ValueError):
-                has_position = True
-        if not has_position and self.test_mode:
-            has_position = self.symbol_manager.current_symbol in global_state.virtual_positions
-        actual_action = 'hold' if has_position else 'wait'
-
-        action_display = '持仓观望' if actual_action == 'hold' else '观望'
-        print(f"\n✅ 决策: {action_display} ({actual_action})")
-
-        regime_txt = vote_result.regime.get('regime', 'Unknown') if vote_result.regime else 'Unknown'
-        pos_txt = f"{min(max(vote_result.position.get('position_pct', 0), 0), 100):.0f}%" if vote_result.position else 'N/A'
-        global_state.add_log(f"⚖️ DecisionCoreAgent (The Critic): Context(Regime={regime_txt}, Pos={pos_txt}) => Vote: {actual_action.upper()} ({vote_result.reason})")
-
-        decision_dict = self._build_decision_snapshot(
-            vote_result=vote_result,
-            quant_analysis=quant_analysis,
-            predict_result=predict_result,
-            risk_level='safe',
-            guardian_passed=True,
-            action_override=actual_action
-        )
-        global_state.update_decision(decision_dict)
-
-        return {
-            'status': actual_action,
-            'action': actual_action,
-            'details': {
-                'reason': vote_result.reason,
-                'confidence': vote_result.confidence
-            }
-        }
-    
     async def _resolve_auto3_symbols(self):
         """
         🔝 AUTO3 Dynamic Resolution via Backtest
@@ -782,52 +514,6 @@ class MultiAgentTradingBot:
                 'details': {'error': str(e)}
             }
     
-    def _get_open_trade_meta(self, symbol: str) -> Optional[Dict]:
-        """Return latest open trade record for symbol, if any."""
-        history = global_state.trade_history or []
-        for trade in history:
-            if trade.get('symbol') != symbol:
-                continue
-            status = str(trade.get('status', '')).upper()
-            close_cycle = trade.get('close_cycle', 0)
-            exit_price = trade.get('exit_price', 0)
-            is_closed = (
-                'CLOSED' in status or
-                (isinstance(close_cycle, (int, float)) and close_cycle > 0) or
-                (isinstance(exit_price, (int, float)) and exit_price > 0)
-            )
-            if not is_closed:
-                return trade
-        return None
-
-    def _get_holding_cycles(self, open_trade: Optional[Dict]) -> Optional[int]:
-        """Estimate holding cycles from open trade metadata."""
-        if not open_trade:
-            return None
-        open_cycle = open_trade.get('open_cycle')
-        if isinstance(open_cycle, (int, float)):
-            return max(0, int(global_state.cycle_counter) - int(open_cycle))
-        return None
-
-    def _get_holding_hours(self, symbol: str, open_trade: Optional[Dict]) -> Optional[float]:
-        """Estimate holding duration in hours using cycle counter or entry_time."""
-        if open_trade:
-            hold_cycles = self._get_holding_cycles(open_trade)
-            if hold_cycles is not None:
-                cycle_interval = max(1, int(getattr(global_state, 'cycle_interval', 3) or 3))
-                hold_minutes = hold_cycles * cycle_interval
-                return hold_minutes / 60.0
-        if self.test_mode:
-            v_pos = global_state.virtual_positions.get(symbol)
-            entry_time = v_pos.get('entry_time') if isinstance(v_pos, dict) else None
-            if entry_time:
-                try:
-                    started = datetime.fromisoformat(entry_time)
-                    return max(0.0, (datetime.now() - started).total_seconds() / 3600.0)
-                except Exception:
-                    pass
-        return None
-
     def _get_cycle_logger(self):
         if self._cycle_logger is None:
             try:
@@ -1193,7 +879,7 @@ class MultiAgentTradingBot:
         self.config._config['binance']['api_secret'] = fresh_api_secret
         
         # Recreate client on mode switch to pick up latest env/config credentials.
-        self.client = BinanceClient()
+        self.client = BinanceClient(api_key=fresh_api_key, api_secret=fresh_api_secret, test_mode=self.test_mode)
         self.agent_provider.reload(self.client)
         self.runner_provider.reload(self.client)
 

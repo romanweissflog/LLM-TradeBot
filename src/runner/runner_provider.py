@@ -11,6 +11,7 @@ from src.trading.symbol_manager import SymbolManager
 from .action_pipeline_stage_runner import ActionPipelineStageRunner
 from .agent_analysis_stage_runner import AgentAnalysisStageRunner
 from .cycle_pipeline_runner import CyclePipelineRunner
+from .decision_pipeline_stage_runner import DecisionPipelineStageRunner
 from .decision_stage_runner import DecisionStageRunner
 from .execution_stage_runner import ExecutionStageRunner
 from .oracle_stage_runner import OracleStageRunner
@@ -39,7 +40,8 @@ class RunnerProvider:
     ):
         self.action_pipeline_stage_runner = ActionPipelineStageRunner(
             symbol_manager,
-            self
+            self,
+            saver
         )
 
         self.agent_analysis_stage_runner = AgentAnalysisStageRunner(
@@ -53,7 +55,15 @@ class RunnerProvider:
             self
         )
 
+        self.decision_pipeline_stage_runner = DecisionPipelineStageRunner(
+            symbol_manager,
+            self,
+            saver,
+            test_mode
+        )
+
         self.decision_stage_runner = DecisionStageRunner(
+            config,
             agent_config,
             symbol_manager,
             strategy_engine,

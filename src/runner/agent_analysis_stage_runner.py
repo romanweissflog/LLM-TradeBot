@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Any, Tuple
+from typing import Dict, Optional, Any, Tuple, TYPE_CHECKING
 
 from src.utils.data_saver import DataSaver
 
@@ -9,11 +9,14 @@ from src.agents.predict_result import PredictResult  # ✅ PredictResult Import
 from src.utils.logger import log
 from src.server.state import global_state
 
+if TYPE_CHECKING:
+    from .runner_provider import RunnerProvider
+
 class AgentAnalysisStageRunner:
     def __init__(
         self,
         symbol_manager: SymbolManager,
-        runner_provider,
+        runner_provider: "RunnerProvider",
         saver: DataSaver
     ):
         self.symbol_manager = symbol_manager

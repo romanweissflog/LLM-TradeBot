@@ -54,8 +54,8 @@ class FourLayerFilterStageRunner:
             funding_rate = 0
 
         df_1h = processed_dfs['1h']
-        if self.agent_provider.regime_detector and len(df_1h) >= 20:
-            regime_result = self.agent_provider.regime_detector.detect_regime(df_1h)
+        if self.agent_provider.regime_detector_agent and len(df_1h) >= 20:
+            regime_result = self.agent_provider.regime_detector_agent.detect_regime(df_1h)
         else:
             regime_result = {'adx': 20, 'regime': 'unknown', 'confidence': 0}
         adx_value = regime_result.get('adx', 20)

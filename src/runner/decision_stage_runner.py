@@ -1,8 +1,10 @@
 import asyncio
+from datetime import datetime
 from typing import Dict, Optional, Any, Tuple
 
 from dataclasses import asdict
 
+from src.config import Config
 from src.strategy.llm_engine import StrategyEngine
 from src.agents.agent_config import AgentConfig
 from src.agents.decision_core_agent import VoteResult, DecisionCoreAgent
@@ -10,6 +12,7 @@ from src.utils.semantic_converter import SemanticConverter  # ✅ Global Import
 
 from src.agents.runtime_events import emit_global_runtime_event
 from src.utils.task_util import run_task_with_timeout
+from src.utils.agents_util import get_agent_timeout
 
 from src.trading.symbol_manager import SymbolManager
 from src.agents.predict_result import PredictResult  # ✅ PredictResult Import
@@ -23,11 +26,13 @@ from src.utils.action_protocol import (
 class DecisionStageRunner:
     def __init__(
         self,
+        config: Config,
         agent_config: AgentConfig,
         symbol_manager: SymbolManager,
         strategy_engine: StrategyEngine,
         max_position_size: float = 100.0,
     ):
+        self.config = config
         self.agent_config = agent_config
         self.symbol_manager = symbol_manager
         self.max_position_size = max_position_size
@@ -35,7 +40,7 @@ class DecisionStageRunner:
         
         self.decision_core = DecisionCoreAgent()
     
-    async def _run_decision_stage(
+    async def run(
         self,
         *,
         run_id: str,
@@ -169,7 +174,7 @@ class DecisionStageRunner:
                 }
 
                 log.info("🐂🐻 Gathering Bull/Bear perspectives in PARALLEL...")
-                llm_perspective_timeout = self._get_agent_timeout('llm_perspective', 45.0)
+                llm_perspective_timeout = get_agent_timeout(self.config, self.agent_config, 'llm_perspective', 45.0)
                 loop = asyncio.get_running_loop()
                 bull_p, bear_p = await asyncio.gather(
                     run_task_with_timeout(
@@ -352,6 +357,113 @@ class DecisionStageRunner:
 
         return decision_payload, decision_source, fast_signal, vote_result, selected_agent_outputs
 
+    def _check_forced_exit(self, position_info: Optional[Dict]) -> Optional[Dict]:
+        """Force exit for stale or losing positions to cap drawdowns."""
+        if not position_info:
+            return None
+        symbol = position_info.get('symbol') or self.current_symbol
+        side = str(position_info.get('side', '')).lower()
+        close_action = 'close_long' if side == 'long' else ('close_short' if side == 'short' else 'wait')
+        pnl_pct = position_info.get('pnl_pct')
+        if pnl_pct is None:
+            return None
+
+        open_trade = self._get_open_trade_meta(symbol)
+        hold_cycles = self._get_holding_cycles(open_trade)
+        hold_hours = self._get_holding_hours(symbol, open_trade)
+        max_hold_cycles = self.config.get('risk.max_holding_cycles')
+        max_hold_hours = self.config.get('risk.max_holding_hours')
+        if max_hold_cycles is None:
+            max_hold_cycles = 180
+        if max_hold_hours is None and hold_cycles is not None:
+            cycle_interval = max(1, int(getattr(global_state, 'cycle_interval', 3) or 3))
+            max_hold_hours = (max_hold_cycles * cycle_interval) / 60.0
+        hold_tag = f"{hold_hours:.1f}h" if hold_hours is not None else "n/a"
+
+        if hold_cycles is not None and isinstance(max_hold_cycles, (int, float)):
+            if hold_cycles >= int(max_hold_cycles):
+                return {
+                    'action': close_action,
+                    'confidence': 92,
+                    'reasoning': f"Forced exit: holding cycles cap {int(max_hold_cycles)} hit ({hold_cycles} cycles, {hold_tag})"
+                }
+        if hold_hours is not None and isinstance(max_hold_hours, (int, float)):
+            if hold_hours >= float(max_hold_hours):
+                return {
+                    'action': close_action,
+                    'confidence': 92,
+                    'reasoning': f"Forced exit: holding hours cap {float(max_hold_hours):.1f}h hit ({hold_tag})"
+                }
+
+        # Immediate loss cut
+        if pnl_pct <= -5:
+            return {
+                'action': close_action,
+                'confidence': 95,
+                'reasoning': f"Forced exit: loss {pnl_pct:+.2f}% exceeds -5% cap (hold {hold_tag})"
+            }
+
+        # Time-based exit for losing/stale positions
+        if hold_hours is not None:
+            if hold_hours >= 6 and pnl_pct < -1:
+                return {
+                    'action': close_action,
+                    'confidence': 90,
+                    'reasoning': f"Forced exit: loss {pnl_pct:+.2f}% with stale hold {hold_tag}"
+                }
+            if hold_hours >= 12 and pnl_pct <= 0.3:
+                return {
+                    'action': close_action,
+                    'confidence': 85,
+                    'reasoning': f"Forced exit: capital tie-up {hold_tag} with low edge ({pnl_pct:+.2f}%)"
+                }
+        return None
+    
+    def _get_open_trade_meta(self, symbol: str) -> Optional[Dict]:
+        """Return latest open trade record for symbol, if any."""
+        history = global_state.trade_history or []
+        for trade in history:
+            if trade.get('symbol') != symbol:
+                continue
+            status = str(trade.get('status', '')).upper()
+            close_cycle = trade.get('close_cycle', 0)
+            exit_price = trade.get('exit_price', 0)
+            is_closed = (
+                'CLOSED' in status or
+                (isinstance(close_cycle, (int, float)) and close_cycle > 0) or
+                (isinstance(exit_price, (int, float)) and exit_price > 0)
+            )
+            if not is_closed:
+                return trade
+        return None
+
+    def _get_holding_cycles(self, open_trade: Optional[Dict]) -> Optional[int]:
+        """Estimate holding cycles from open trade metadata."""
+        if not open_trade:
+            return None
+        open_cycle = open_trade.get('open_cycle')
+        if isinstance(open_cycle, (int, float)):
+            return max(0, int(global_state.cycle_counter) - int(open_cycle))
+        return None
+
+    def _get_holding_hours(self, symbol: str, open_trade: Optional[Dict]) -> Optional[float]:
+        """Estimate holding duration in hours using cycle counter or entry_time."""
+        if open_trade:
+            hold_cycles = self._get_holding_cycles(open_trade)
+            if hold_cycles is not None:
+                cycle_interval = max(1, int(getattr(global_state, 'cycle_interval', 3) or 3))
+                hold_minutes = hold_cycles * cycle_interval
+                return hold_minutes / 60.0
+        if self.test_mode:
+            v_pos = global_state.virtual_positions.get(symbol)
+            entry_time = v_pos.get('entry_time') if isinstance(v_pos, dict) else None
+            if entry_time:
+                try:
+                    started = datetime.fromisoformat(entry_time)
+                    return max(0.0, (datetime.now() - started).total_seconds() / 3600.0)
+                except Exception:
+                    pass
+        return None
     
     def _collect_selected_agent_outputs(
         self,

@@ -1,18 +1,29 @@
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, TYPE_CHECKING
 
 from src.utils.logger import log
 from src.server.state import global_state
 
 from src.trading.symbol_manager import SymbolManager
+from src.trading.result_builder import ResultBuilder
+
+from src.utils.data_saver import DataSaver
+
+if TYPE_CHECKING:
+    from .runner_provider import RunnerProvider
 
 class ActionPipelineStageRunner:
     def __init__(
         self,
         symbol_manager: SymbolManager,
-        runner_provider
+        runner_provider: "RunnerProvider",
+        saver: DataSaver
     ):
         self.symbol_manager = symbol_manager
         self.runner_provider = runner_provider
+        self.result_builder = ResultBuilder(
+            symbol_manager,
+            saver
+        )
     
     async def run(
         self,
@@ -90,7 +101,7 @@ class ActionPipelineStageRunner:
         current_price: float
     ) -> Optional[Dict[str, Any]]:
         """Persist audit outcome, apply corrections, update state, and return blocked result if needed."""
-        decision_dict = self._build_decision_snapshot(
+        decision_dict = self.result_builder.build_decision_snapshot(
             vote_result=vote_result,
             quant_analysis=quant_analysis,
             predict_result=predict_result,

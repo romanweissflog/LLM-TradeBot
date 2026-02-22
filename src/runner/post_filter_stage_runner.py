@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, TYPE_CHECKING
 
 from src.agents.runtime_events import emit_global_runtime_event
 from src.agents.agent_provider import AgentProvider
@@ -8,12 +8,15 @@ from src.server.state import global_state
 
 from src.trading.symbol_manager import SymbolManager
 
+if TYPE_CHECKING:
+    from .runner_provider import RunnerProvider
+
 class PostFilterStageRunner:
     def __init__(
         self,
         symbol_manager: SymbolManager,
         agent_provider: AgentProvider,
-        runner_provider
+        runner_provider: "RunnerProvider"
     ):
         self.symbol_manager = symbol_manager
         self.agent_provider = agent_provider  

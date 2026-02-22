@@ -178,6 +178,70 @@ class DummySmoothVsChoppyClient:
         return data[-limit:]
 
 
+class DummyEdgeVsMidClient:
+    def __init__(self, *args, **kwargs):
+        edge_prices = [1.0 + 0.001 * i for i in range(120)]
+        base = 1.0 + 0.001 * 90
+        # Same net gain as EDGE in the last 30 bars, but with large intrawindow retrace.
+        mid_tail = []
+        for i in range(30):
+            if i < 15:
+                mid_tail.append(base + 0.003 * i)
+            else:
+                mid_tail.append(base + 0.003 * 15 - 0.001 * (i - 15))
+        mid_prices = [1.0 + 0.001 * i for i in range(90)] + mid_tail
+
+        edge_1m = _build_klines(edge_prices, [130.0] * 90 + [210.0] * 30)
+        mid_1m = _build_klines(mid_prices, [130.0] * 90 + [210.0] * 30)
+        tf15 = _build_klines([1.0 + 0.01 * i for i in range(80)], [900.0 + i * 2 for i in range(80)])
+        tf1h = _build_klines([1.0 + 0.025 * i for i in range(80)], [1500.0 + i * 4 for i in range(80)])
+
+        self._series = {
+            "EDGEUSDT": {"1m": edge_1m, "15m": tf15, "1h": tf1h},
+            "MIDUSDT": {"1m": mid_1m, "15m": tf15, "1h": tf1h},
+        }
+
+    def get_all_tickers(self):
+        return [
+            {"symbol": "EDGEUSDT", "quoteVolume": "30000000", "lastPrice": "1.12", "priceChangePercent": "5.1"},
+            {"symbol": "MIDUSDT", "quoteVolume": "30000000", "lastPrice": "1.12", "priceChangePercent": "5.1"},
+        ]
+
+    def get_klines(self, symbol: str, interval: str, limit: int = 500, start_time: int = None):
+        data = self._series[symbol][interval]
+        return data[-limit:]
+
+
+class DummyFreshVsStaleClient:
+    def __init__(self, *args, **kwargs):
+        base = [1.0 + 0.001 * i for i in range(120)]
+        fresh_tail = base[:]
+        stale_tail = base[:]
+        # Keep same broad trend; only last 5 bars differ in momentum freshness.
+        for i in range(115, 120):
+            fresh_tail[i] = fresh_tail[i - 1] + 0.002
+            stale_tail[i] = stale_tail[i - 1] + 0.0001
+
+        fresh_1m = _build_klines(fresh_tail, [125.0] * 90 + [205.0] * 30)
+        stale_1m = _build_klines(stale_tail, [125.0] * 90 + [205.0] * 30)
+        tf15 = _build_klines([1.0 + 0.01 * i for i in range(80)], [920.0 + i * 2 for i in range(80)])
+        tf1h = _build_klines([1.0 + 0.024 * i for i in range(80)], [1480.0 + i * 4 for i in range(80)])
+        self._series = {
+            "FRESHUSDT": {"1m": fresh_1m, "15m": tf15, "1h": tf1h},
+            "STALEUSDT": {"1m": stale_1m, "15m": tf15, "1h": tf1h},
+        }
+
+    def get_all_tickers(self):
+        return [
+            {"symbol": "FRESHUSDT", "quoteVolume": "26000000", "lastPrice": "1.17", "priceChangePercent": "5.0"},
+            {"symbol": "STALEUSDT", "quoteVolume": "26000000", "lastPrice": "1.17", "priceChangePercent": "5.0"},
+        ]
+
+    def get_klines(self, symbol: str, interval: str, limit: int = 500, start_time: int = None):
+        data = self._series[symbol][interval]
+        return data[-limit:]
+
+
 def test_timeframe_alignment_bias():
     selector = SymbolSelectorAgent()
     up_closes = [1.0 + 0.01 * i for i in range(90)]
@@ -285,3 +349,55 @@ def test_auto1_prefers_smoother_impulse_when_move_size_similar(monkeypatch):
     smooth_res = selector.last_auto1["results"]["SMOOTHUSDT"]
     choppy_res = selector.last_auto1["results"]["CHOPPYUSDT"]
     assert smooth_res["impulse_ratio"] > choppy_res["impulse_ratio"]
+
+
+def test_auto1_prefers_directional_edge_over_mid_range_retrace(monkeypatch):
+    import src.api.binance_client as binance_client_module
+
+    monkeypatch.setattr(binance_client_module, "BinanceClient", DummyEdgeVsMidClient)
+    selector = SymbolSelectorAgent()
+
+    selected = asyncio.run(
+        selector.select_auto1_recent_momentum(
+            candidates=["EDGEUSDT", "MIDUSDT"],
+            window_minutes=30,
+            interval="1m",
+            threshold_pct=0.3,
+            volume_ratio_threshold=1.0,
+            min_adx=10,
+            min_directional_score=0.1,
+            min_alignment_score=-0.5,
+            relax_factor=0.8,
+        )
+    )
+
+    assert selected == ["EDGEUSDT"]
+    edge_res = selector.last_auto1["results"]["EDGEUSDT"]
+    mid_res = selector.last_auto1["results"]["MIDUSDT"]
+    assert edge_res["directional_range_position"] > mid_res["directional_range_position"]
+
+
+def test_auto1_prefers_fresh_momentum_over_stale_tail(monkeypatch):
+    import src.api.binance_client as binance_client_module
+
+    monkeypatch.setattr(binance_client_module, "BinanceClient", DummyFreshVsStaleClient)
+    selector = SymbolSelectorAgent()
+
+    selected = asyncio.run(
+        selector.select_auto1_recent_momentum(
+            candidates=["FRESHUSDT", "STALEUSDT"],
+            window_minutes=30,
+            interval="1m",
+            threshold_pct=0.3,
+            volume_ratio_threshold=1.0,
+            min_adx=10,
+            min_directional_score=0.1,
+            min_alignment_score=-0.5,
+            relax_factor=0.8,
+        )
+    )
+
+    assert selected == ["FRESHUSDT"]
+    fresh_res = selector.last_auto1["results"]["FRESHUSDT"]
+    stale_res = selector.last_auto1["results"]["STALEUSDT"]
+    assert fresh_res["freshness_score"] > stale_res["freshness_score"]

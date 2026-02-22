@@ -492,12 +492,27 @@ class SymbolSelectorAgent:
                 direction = 1 if change_pct > 0 else (-1 if change_pct < 0 else 0)
                 recent_closes = [float(k.get("close", 0.0) or 0.0) for k in recent]
                 consistency = self._compute_directional_consistency(recent_closes, direction)
+                freshness_score = 0.0
+                if direction != 0 and len(recent_closes) >= 6 and abs(change_pct) > 1e-8:
+                    prev_ref = recent_closes[-6]
+                    if prev_ref:
+                        tail_change_pct = ((recent_closes[-1] - prev_ref) / prev_ref) * 100.0
+                        freshness_raw = (direction * tail_change_pct) / abs(change_pct)
+                        freshness_score = max(0.0, min(2.0, freshness_raw))
                 path_distance = 0.0
                 for i in range(1, len(recent_closes)):
                     path_distance += abs(recent_closes[i] - recent_closes[i - 1])
                 net_distance = abs(end_price - start_price)
                 path_efficiency = (net_distance / path_distance) if path_distance > 0 else 0.0
                 impulse_ratio = self._compute_impulse_ratio(recent_closes)
+                recent_high = max(float(k.get("high", 0.0) or 0.0) for k in recent)
+                recent_low = min(float(k.get("low", 0.0) or 0.0) for k in recent)
+                if recent_high > recent_low:
+                    range_position = (end_price - recent_low) / (recent_high - recent_low)
+                else:
+                    range_position = 0.5
+                range_position = max(0.0, min(1.0, range_position))
+                directional_range_position = range_position if direction > 0 else (1.0 - range_position)
 
                 closes_15m = [float(k.get("close", 0.0) or 0.0) for k in klines_15m]
                 closes_1h = [float(k.get("close", 0.0) or 0.0) for k in klines_1h]
@@ -523,6 +538,10 @@ class SymbolSelectorAgent:
                 # Prefer clean directional pushes over noisy chop with same % change.
                 score *= (0.75 + max(0.0, min(1.0, path_efficiency)) * 0.5)
                 score *= (0.75 + min(2.5, impulse_ratio) * 0.35)
+                # Prefer moves still advancing in the latest bars.
+                score *= (0.8 + min(1.5, freshness_score) * 0.25)
+                # Favor symbols closing near directional edge of recent window range.
+                score *= (0.8 + directional_range_position * 0.4)
                 exhausted = False
                 if direction > 0 and rsi_15m >= 72:
                     exhausted = True
@@ -542,8 +561,11 @@ class SymbolSelectorAgent:
                     "adx_1h": adx_1h,
                     "day_change_pct": day_change_pct,
                     "consistency": consistency,
+                    "freshness_score": freshness_score,
                     "path_efficiency": path_efficiency,
                     "impulse_ratio": impulse_ratio,
+                    "range_position": range_position,
+                    "directional_range_position": directional_range_position,
                     "alignment_score": alignment_score,
                     "rsi_15m": rsi_15m,
                     "score": score,
@@ -574,6 +596,8 @@ class SymbolSelectorAgent:
             and r["score"] >= min_score
             and r["alignment_score"] >= min_align
             and r.get("impulse_ratio", 0.0) >= min_impulse
+            and r.get("directional_range_position", 0.0) >= 0.55
+            and r.get("freshness_score", 0.0) >= 0.12
             and not r.get("exhausted", False)
         ]
         strong_downs = [
@@ -584,6 +608,8 @@ class SymbolSelectorAgent:
             and r["score"] >= min_score
             and r["alignment_score"] >= min_align
             and r.get("impulse_ratio", 0.0) >= min_impulse
+            and r.get("directional_range_position", 0.0) >= 0.55
+            and r.get("freshness_score", 0.0) >= 0.12
             and not r.get("exhausted", False)
         ]
 
@@ -596,6 +622,8 @@ class SymbolSelectorAgent:
                 and r["score"] >= min_score * relax
                 and r["alignment_score"] >= min_align - (1.0 - relax)
                 and r.get("impulse_ratio", 0.0) >= max(0.45, min_impulse * relax)
+                and r.get("directional_range_position", 0.0) >= 0.45
+                and r.get("freshness_score", 0.0) >= 0.05
             ]
         if not strong_downs:
             strong_downs = [
@@ -606,6 +634,8 @@ class SymbolSelectorAgent:
                 and r["score"] >= min_score * relax
                 and r["alignment_score"] >= min_align - (1.0 - relax)
                 and r.get("impulse_ratio", 0.0) >= max(0.45, min_impulse * relax)
+                and r.get("directional_range_position", 0.0) >= 0.45
+                and r.get("freshness_score", 0.0) >= 0.05
             ]
 
         if strong_ups:
@@ -621,12 +651,16 @@ class SymbolSelectorAgent:
             and best_up.get("score", 0) >= min_select_score
             and best_up.get("alignment_score", 0) >= min_select_align
             and best_up.get("impulse_ratio", 0) >= max(0.45, min_impulse * relax)
+            and best_up.get("directional_range_position", 0) >= 0.45
+            and best_up.get("freshness_score", 0) >= 0.05
         )
         down_qualified = (
             best_down.get("change_pct", 0) < 0
             and best_down.get("score", 0) >= min_select_score
             and best_down.get("alignment_score", 0) >= min_select_align
             and best_down.get("impulse_ratio", 0) >= max(0.45, min_impulse * relax)
+            and best_down.get("directional_range_position", 0) >= 0.45
+            and best_down.get("freshness_score", 0) >= 0.05
         )
 
         if up_qualified:
@@ -650,22 +684,26 @@ class SymbolSelectorAgent:
             adx_val = entry.get("adx", 0)
             align_val = entry.get("alignment_score", 0.0)
             consistency = entry.get("consistency", 0.5)
+            freshness_score = entry.get("freshness_score", 0.0)
             impulse_ratio = entry.get("impulse_ratio", 0.0)
+            directional_range_position = entry.get("directional_range_position", 0.0)
             rsi_15m = entry.get("rsi_15m", 50.0)
             vol_text = f"VOL x{vol_ratio:.2f}"
             adx_text = f"ADX={adx_val:.0f}"
             align_text = f"ALIGN={align_val:+.2f}"
             consistency_text = f"CONS={consistency:.2f}"
+            freshness_text = f"FRESH={freshness_score:.2f}"
             impulse_text = f"IMP={impulse_ratio:.2f}"
+            edge_text = f"EDGE={directional_range_position:.2f}"
             rsi_text = f"RSI15={rsi_15m:.0f}"
             if strong:
                 log.info(
-                    f"🎯 AUTO1 {label}: {entry['symbol']} ({direction} {entry['change_pct']:+.2f}% | {vol_text} | {adx_text} | {align_text} | {consistency_text} | {impulse_text} | {rsi_text} | SCORE={entry['score']:.2f})"
+                    f"🎯 AUTO1 {label}: {entry['symbol']} ({direction} {entry['change_pct']:+.2f}% | {vol_text} | {adx_text} | {align_text} | {consistency_text} | {freshness_text} | {impulse_text} | {edge_text} | {rsi_text} | SCORE={entry['score']:.2f})"
                 )
             else:
                 log.info(
                     f"ℹ️ AUTO1 {label} weak (<{threshold_pct:.2f}% or VOL<{volume_ratio_threshold:.2f}x): "
-                    f"{entry['symbol']} ({direction} {entry['change_pct']:+.2f}% | {vol_text} | {adx_text} | {align_text} | {consistency_text} | {impulse_text} | {rsi_text} | SCORE={entry['score']:.2f})"
+                    f"{entry['symbol']} ({direction} {entry['change_pct']:+.2f}% | {vol_text} | {adx_text} | {align_text} | {consistency_text} | {freshness_text} | {impulse_text} | {edge_text} | {rsi_text} | SCORE={entry['score']:.2f})"
                 )
 
         if best_up["symbol"] in selected:

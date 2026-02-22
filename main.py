@@ -782,6 +782,49 @@ class MultiAgentTradingBot:
                     alignment_score = metrics.get("alignment_score")
                     if isinstance(alignment_score, (int, float)):
                         selector_payload["alignment_score"] = alignment_score
+                    impulse_ratio = metrics.get("impulse_ratio")
+                    if isinstance(impulse_ratio, (int, float)):
+                        selector_payload["impulse_ratio"] = impulse_ratio
+                    freshness_score = metrics.get("freshness_score")
+                    if isinstance(freshness_score, (int, float)):
+                        selector_payload["freshness_score"] = freshness_score
+                    directional_edge = metrics.get("directional_range_position")
+                    if isinstance(directional_edge, (int, float)):
+                        selector_payload["directional_edge"] = directional_edge
+
+                    all_metrics = auto1.get("results", {})
+                    if isinstance(all_metrics, dict) and all_metrics:
+                        def _safe_float(value: Any, default: float = 0.0) -> float:
+                            try:
+                                return float(value)
+                            except (TypeError, ValueError):
+                                return float(default)
+
+                        ranked = []
+                        for sym, item in all_metrics.items():
+                            if not isinstance(item, dict):
+                                continue
+                            item_change = _safe_float(item.get("change_pct", 0) or 0)
+                            item_score = _safe_float(item.get("score", 0) or 0)
+                            if item_change > 0:
+                                item_dir = "UP"
+                            elif item_change < 0:
+                                item_dir = "DOWN"
+                            else:
+                                item_dir = "FLAT"
+                            ranked.append({
+                                "symbol": sym,
+                                "direction": item_dir,
+                                "change_pct": item_change,
+                                "score": item_score,
+                                "volume_ratio": _safe_float(item.get("volume_ratio", 0) or 0),
+                                "alignment_score": _safe_float(item.get("alignment_score", 0) or 0),
+                                "impulse_ratio": _safe_float(item.get("impulse_ratio", 0) or 0),
+                                "freshness_score": _safe_float(item.get("freshness_score", 0) or 0),
+                                "directional_edge": _safe_float(item.get("directional_range_position", 0) or 0),
+                            })
+                        ranked.sort(key=lambda x: x.get("score", 0), reverse=True)
+                        selector_payload["ranked_candidates"] = ranked[:5]
                     selector_payload["window_minutes"] = auto1.get("window_minutes")
                     selector_payload["threshold_pct"] = auto1.get("threshold_pct")
                 global_state.symbol_selector = selector_payload
@@ -814,6 +857,53 @@ class MultiAgentTradingBot:
             self.selector_last_run = selector_started
             if reason == "startup":
                 self.selector_startup_done = True
+
+    def _get_auto1_execution_bonus(self, symbol: str) -> float:
+        """
+        Return bounded confidence bonus from AUTO1 symbol-quality metrics.
+        Applied only as tie-break/priority nudging when multiple symbols are suggested.
+        """
+        if not symbol:
+            return 0.0
+        if not self.agent_config.symbol_selector_agent or self.use_auto3:
+            return 0.0
+
+        try:
+            selector = get_selector()
+            auto1 = getattr(selector, "last_auto1", {}) or {}
+            metrics = (auto1.get("results", {}) or {}).get(symbol, {})
+            if not isinstance(metrics, dict) or not metrics:
+                return 0.0
+        except Exception:
+            return 0.0
+
+        def _safe_float(value: Any, default: float = 0.0) -> float:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return float(default)
+
+        change_abs = abs(_safe_float(metrics.get("change_pct", 0) or 0))
+        score = max(0.0, _safe_float(metrics.get("score", 0) or 0))
+        alignment = max(0.0, _safe_float(metrics.get("alignment_score", 0) or 0))
+        impulse = max(0.0, _safe_float(metrics.get("impulse_ratio", 0) or 0))
+        freshness = max(0.0, _safe_float(metrics.get("freshness_score", 0) or 0))
+        edge = max(0.0, min(1.0, _safe_float(metrics.get("directional_range_position", 0.5) or 0.5)))
+        volume_ratio = max(0.0, _safe_float(metrics.get("volume_ratio", 1.0) or 1.0))
+
+        bonus = 0.0
+        bonus += min(3.0, max(0.0, change_abs - 0.5) * 1.2)
+        bonus += min(2.6, score * 0.25)
+        bonus += min(1.4, alignment * 1.6)
+        bonus += min(1.2, impulse * 0.7)
+        bonus += min(0.9, freshness * 0.8)
+        bonus += min(0.9, edge * 1.0)
+        if volume_ratio >= 1.3:
+            bonus += 0.7
+        elif volume_ratio >= 1.1:
+            bonus += 0.4
+
+        return max(0.0, min(8.5, float(bonus)))
 
     def _get_active_position_symbols(self) -> List[str]:
         """Return symbols with active positions (test + live)."""
@@ -5559,12 +5649,23 @@ class MultiAgentTradingBot:
                 
                 # Step 2: 从所有开仓决策中选择信心度最高的一个
                 if all_decisions:
-                    # 按信心度排序
-                    all_decisions.sort(key=lambda x: x.confidence, reverse=True)
+                    # 按置信度 + AUTO1 趋势质量加分排序（加分仅用于优先级微调）
+                    all_decisions.sort(
+                        key=lambda x: x.confidence + self._get_auto1_execution_bonus(x.symbol),
+                        reverse=True
+                    )
                     best_decision = all_decisions[0]
+                    best_bonus = self._get_auto1_execution_bonus(best_decision.symbol)
+                    best_adjusted = best_decision.confidence + best_bonus
                     
-                    print(f"\n🎯 本周期最优开仓机会: {best_decision.symbol} (信心度: {best_decision.confidence:.1f}%)")
-                    global_state.add_log(f"[🎯 SYSTEM] Best: {best_decision.symbol} (Conf: {best_decision.confidence:.1f}%)")
+                    print(
+                        f"\n🎯 本周期最优开仓机会: {best_decision.symbol} "
+                        f"(信心度: {best_decision.confidence:.1f}% | AUTO1加分: +{best_bonus:.1f} | 调整后: {best_adjusted:.1f}%)"
+                    )
+                    global_state.add_log(
+                        f"[🎯 SYSTEM] Best: {best_decision.symbol} "
+                        f"(Conf: {best_decision.confidence:.1f}% + Bonus {best_bonus:.1f} = {best_adjusted:.1f}%)"
+                    )
                     
                     # 只执行最优的一个（直接执行已审计建议，避免重复跑完整流程）
                     try:
@@ -5591,10 +5692,11 @@ class MultiAgentTradingBot:
                     
                     # 如果有其他开仓机会被跳过，记录下来
                     if len(all_decisions) > 1:
-                        skipped = [f"{d.symbol}({d.confidence:.1f}%)" for d in all_decisions[1:]]
+                        skipped = [
+                            f"{d.symbol}({d.confidence:.1f}%+{self._get_auto1_execution_bonus(d.symbol):.1f})"
+                            for d in all_decisions[1:]
+                        ]
                         print(f"  ⏭️  跳过其他机会: {', '.join(skipped)}")
-                        global_state.add_log(f"⏭️  Skipped opportunities: {', '.join(skipped)} (1 position per cycle limit)")
-                
                         global_state.add_log(f"⏭️  Skipped opportunities: {', '.join(skipped)} (1 position per cycle limit)")
                 
                 # 💰 Update Virtual Account PnL (Mark-to-Market)

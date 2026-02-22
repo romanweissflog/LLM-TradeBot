@@ -749,6 +749,31 @@ textarea:focus {
     font-family: 'IBM Plex Mono', monospace;
 }
 
+/* Keep LLM metrics inside left sidebar even when token numbers are very long */
+.llm-metrics-panel .stat-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+    column-gap: 8px;
+    align-items: start;
+}
+
+.llm-metrics-panel .stat-row .label {
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.25;
+}
+
+.llm-metrics-panel .stat-row .value {
+    min-width: 0;
+    max-width: 100%;
+    text-align: right;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    line-height: 1.25;
+}
+
 /* Existing Chatroom Overrides */
 .chatroom-container {
     display: flex;

@@ -131,6 +131,53 @@ class DummyVolumeBiasClient:
         return data[-limit:]
 
 
+class DummySmoothVsChoppyClient:
+    def __init__(self, *args, **kwargs):
+        smooth_1m = _build_klines(
+            [1.0 + 0.0015 * i for i in range(120)],
+            [120.0] * 90 + [180.0] * 30,
+        )
+        choppy_prices = []
+        for i in range(120):
+            trend = 1.0 + 0.0015 * i
+            noise = 0.015 if i % 2 else -0.015
+            choppy_prices.append(trend + noise)
+        choppy_1m = _build_klines(choppy_prices, [120.0] * 90 + [180.0] * 30)
+
+        smooth_15m = _build_klines(
+            [1.0 + 0.01 * i for i in range(80)],
+            [900.0 + i * 3 for i in range(80)],
+        )
+        smooth_1h = _build_klines(
+            [1.0 + 0.025 * i for i in range(80)],
+            [1500.0 + i * 4 for i in range(80)],
+        )
+        self._series = {
+            "SMOOTHUSDT": {"1m": smooth_1m, "15m": smooth_15m, "1h": smooth_1h},
+            "CHOPPYUSDT": {"1m": choppy_1m, "15m": smooth_15m, "1h": smooth_1h},
+        }
+
+    def get_all_tickers(self):
+        return [
+            {
+                "symbol": "SMOOTHUSDT",
+                "quoteVolume": "28000000",
+                "lastPrice": "1.18",
+                "priceChangePercent": "6.1",
+            },
+            {
+                "symbol": "CHOPPYUSDT",
+                "quoteVolume": "28000000",
+                "lastPrice": "1.18",
+                "priceChangePercent": "6.1",
+            },
+        ]
+
+    def get_klines(self, symbol: str, interval: str, limit: int = 500, start_time: int = None):
+        data = self._series[symbol][interval]
+        return data[-limit:]
+
+
 def test_timeframe_alignment_bias():
     selector = SymbolSelectorAgent()
     up_closes = [1.0 + 0.01 * i for i in range(90)]
@@ -212,3 +259,29 @@ def test_auto1_volume_ratio_uses_per_bar_average(monkeypatch):
     assert selected == ["AAAUSDT"]
     result = selector.last_auto1["results"]["AAAUSDT"]
     assert result["volume_ratio"] == 1.0
+
+
+def test_auto1_prefers_smoother_impulse_when_move_size_similar(monkeypatch):
+    import src.api.binance_client as binance_client_module
+
+    monkeypatch.setattr(binance_client_module, "BinanceClient", DummySmoothVsChoppyClient)
+    selector = SymbolSelectorAgent()
+
+    selected = asyncio.run(
+        selector.select_auto1_recent_momentum(
+            candidates=["SMOOTHUSDT", "CHOPPYUSDT"],
+            window_minutes=30,
+            interval="1m",
+            threshold_pct=0.3,
+            volume_ratio_threshold=1.0,
+            min_adx=10,
+            min_directional_score=0.1,
+            min_alignment_score=-0.5,
+            relax_factor=0.8,
+        )
+    )
+
+    assert selected == ["SMOOTHUSDT"]
+    smooth_res = selector.last_auto1["results"]["SMOOTHUSDT"]
+    choppy_res = selector.last_auto1["results"]["CHOPPYUSDT"]
+    assert smooth_res["impulse_ratio"] > choppy_res["impulse_ratio"]

@@ -20,6 +20,7 @@ Updated: 2026-01-10 (Two-stage selection)
 
 import asyncio
 import json
+import math
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -280,6 +281,33 @@ class SymbolSelectorAgent:
 
         return max(-1.0, min(1.0, score))
 
+    def _compute_impulse_ratio(self, closes: List[float]) -> float:
+        """
+        Signal-to-noise for recent move.
+        Higher value means move is cleaner relative to intrawindow noise.
+        """
+        if len(closes) < 4 or closes[0] == 0:
+            return 0.0
+        returns = []
+        for i in range(1, len(closes)):
+            prev = closes[i - 1]
+            curr = closes[i]
+            if prev == 0:
+                continue
+            returns.append((curr - prev) / prev * 100.0)
+        if not returns:
+            return 0.0
+
+        mean_ret = sum(returns) / len(returns)
+        variance = sum((r - mean_ret) ** 2 for r in returns) / len(returns)
+        std_ret = math.sqrt(max(variance, 0.0))
+        net_change_pct = abs((closes[-1] - closes[0]) / closes[0]) * 100.0
+        expected_noise = std_ret * math.sqrt(max(1, len(returns)))
+
+        if expected_noise <= 1e-8:
+            return 2.0 if net_change_pct > 0 else 0.0
+        return max(0.0, min(3.0, net_change_pct / expected_noise))
+
     def _build_directional_score(
         self,
         change_pct: float,
@@ -389,6 +417,7 @@ class SymbolSelectorAgent:
             relax = max(0.5, min(1.0, float(relax_factor)))
         except (TypeError, ValueError):
             relax = self.AUTO1_RELAX_FACTOR
+        min_impulse = 0.75
 
         effective_min_quote_volume = self._get_effective_min_quote_volume(account_equity)
         if account_equity is not None:
@@ -468,6 +497,7 @@ class SymbolSelectorAgent:
                     path_distance += abs(recent_closes[i] - recent_closes[i - 1])
                 net_distance = abs(end_price - start_price)
                 path_efficiency = (net_distance / path_distance) if path_distance > 0 else 0.0
+                impulse_ratio = self._compute_impulse_ratio(recent_closes)
 
                 closes_15m = [float(k.get("close", 0.0) or 0.0) for k in klines_15m]
                 closes_1h = [float(k.get("close", 0.0) or 0.0) for k in klines_1h]
@@ -492,6 +522,7 @@ class SymbolSelectorAgent:
                 )
                 # Prefer clean directional pushes over noisy chop with same % change.
                 score *= (0.75 + max(0.0, min(1.0, path_efficiency)) * 0.5)
+                score *= (0.75 + min(2.5, impulse_ratio) * 0.35)
                 exhausted = False
                 if direction > 0 and rsi_15m >= 72:
                     exhausted = True
@@ -512,6 +543,7 @@ class SymbolSelectorAgent:
                     "day_change_pct": day_change_pct,
                     "consistency": consistency,
                     "path_efficiency": path_efficiency,
+                    "impulse_ratio": impulse_ratio,
                     "alignment_score": alignment_score,
                     "rsi_15m": rsi_15m,
                     "score": score,
@@ -541,6 +573,7 @@ class SymbolSelectorAgent:
             and r["volume_ratio"] >= volume_ratio_threshold
             and r["score"] >= min_score
             and r["alignment_score"] >= min_align
+            and r.get("impulse_ratio", 0.0) >= min_impulse
             and not r.get("exhausted", False)
         ]
         strong_downs = [
@@ -550,6 +583,7 @@ class SymbolSelectorAgent:
             and r["volume_ratio"] >= volume_ratio_threshold
             and r["score"] >= min_score
             and r["alignment_score"] >= min_align
+            and r.get("impulse_ratio", 0.0) >= min_impulse
             and not r.get("exhausted", False)
         ]
 
@@ -561,6 +595,7 @@ class SymbolSelectorAgent:
                 and r["volume_ratio"] >= max(1.0, volume_ratio_threshold * relax)
                 and r["score"] >= min_score * relax
                 and r["alignment_score"] >= min_align - (1.0 - relax)
+                and r.get("impulse_ratio", 0.0) >= max(0.45, min_impulse * relax)
             ]
         if not strong_downs:
             strong_downs = [
@@ -570,6 +605,7 @@ class SymbolSelectorAgent:
                 and r["volume_ratio"] >= max(1.0, volume_ratio_threshold * relax)
                 and r["score"] >= min_score * relax
                 and r["alignment_score"] >= min_align - (1.0 - relax)
+                and r.get("impulse_ratio", 0.0) >= max(0.45, min_impulse * relax)
             ]
 
         if strong_ups:
@@ -584,11 +620,13 @@ class SymbolSelectorAgent:
             best_up.get("change_pct", 0) > 0
             and best_up.get("score", 0) >= min_select_score
             and best_up.get("alignment_score", 0) >= min_select_align
+            and best_up.get("impulse_ratio", 0) >= max(0.45, min_impulse * relax)
         )
         down_qualified = (
             best_down.get("change_pct", 0) < 0
             and best_down.get("score", 0) >= min_select_score
             and best_down.get("alignment_score", 0) >= min_select_align
+            and best_down.get("impulse_ratio", 0) >= max(0.45, min_impulse * relax)
         )
 
         if up_qualified:
@@ -612,20 +650,22 @@ class SymbolSelectorAgent:
             adx_val = entry.get("adx", 0)
             align_val = entry.get("alignment_score", 0.0)
             consistency = entry.get("consistency", 0.5)
+            impulse_ratio = entry.get("impulse_ratio", 0.0)
             rsi_15m = entry.get("rsi_15m", 50.0)
             vol_text = f"VOL x{vol_ratio:.2f}"
             adx_text = f"ADX={adx_val:.0f}"
             align_text = f"ALIGN={align_val:+.2f}"
             consistency_text = f"CONS={consistency:.2f}"
+            impulse_text = f"IMP={impulse_ratio:.2f}"
             rsi_text = f"RSI15={rsi_15m:.0f}"
             if strong:
                 log.info(
-                    f"🎯 AUTO1 {label}: {entry['symbol']} ({direction} {entry['change_pct']:+.2f}% | {vol_text} | {adx_text} | {align_text} | {consistency_text} | {rsi_text} | SCORE={entry['score']:.2f})"
+                    f"🎯 AUTO1 {label}: {entry['symbol']} ({direction} {entry['change_pct']:+.2f}% | {vol_text} | {adx_text} | {align_text} | {consistency_text} | {impulse_text} | {rsi_text} | SCORE={entry['score']:.2f})"
                 )
             else:
                 log.info(
                     f"ℹ️ AUTO1 {label} weak (<{threshold_pct:.2f}% or VOL<{volume_ratio_threshold:.2f}x): "
-                    f"{entry['symbol']} ({direction} {entry['change_pct']:+.2f}% | {vol_text} | {adx_text} | {align_text} | {consistency_text} | {rsi_text} | SCORE={entry['score']:.2f})"
+                    f"{entry['symbol']} ({direction} {entry['change_pct']:+.2f}% | {vol_text} | {adx_text} | {align_text} | {consistency_text} | {impulse_text} | {rsi_text} | SCORE={entry['score']:.2f})"
                 )
 
         if best_up["symbol"] in selected:
@@ -645,6 +685,7 @@ class SymbolSelectorAgent:
             "min_adx": min_adx_value,
             "min_directional_score": min_score,
             "min_alignment_score": min_align,
+            "min_impulse_ratio": min_impulse,
             "relax_factor": relax,
             "candidate_top_n": top_n,
             "selected": list(selected),

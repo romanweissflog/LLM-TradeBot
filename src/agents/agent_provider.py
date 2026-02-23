@@ -1,7 +1,6 @@
 
 from src.config import Config
 from .agent_config import AgentConfig
-from .predict_agents_provider import PredictAgentsProvider
 from src.api.binance_client import BinanceClient
 from src.trading.symbol_manager import SymbolManager
 
@@ -10,7 +9,9 @@ from .quant_analyst_agent import QuantAnalystAgent
 from .regime_detector_agent import RegimeDetector
 from .data_sync_agent import DataSyncAgent
 from .multi_period_agent import MultiPeriodParserAgent
-from src.agents.decision_core_agent import DecisionCoreAgent
+from .predict_agents_provider import PredictAgentsProvider
+from .decision_core_agent import DecisionCoreAgent
+from .symbol_selector_agent import SymbolSelectorAgent
 
 from .reflection.reflection_agent_llm import ReflectionAgentLLM
 from .reflection.reflection_agent_no_llm import ReflectionAgentNoLLM
@@ -29,15 +30,11 @@ class AgentProvider:
         self,
         config: Config,
         agent_config: AgentConfig,
-        client: BinanceClient,
-        symbol_manager: SymbolManager,
+        client: BinanceClient
     ):
         self.config = config
         self.agent_config = agent_config
         self.client = client
-        self.symbol_manager = symbol_manager
-        self._set_predict_agents_provider()
-        self._set_agents()
 
         self.risk_audit_agent = RiskAuditAgent(
             max_leverage=10.0,
@@ -45,16 +42,25 @@ class AgentProvider:
             min_stop_loss_pct=0.005,
             max_stop_loss_pct=0.05
         )
-        self.quant_analyst_agent = QuantAnalystAgent()
-        
+        self.quant_analyst_agent = QuantAnalystAgent()     
         self.multi_period_agent = MultiPeriodParserAgent()
         self.decision_core_agent = DecisionCoreAgent()
+        self.symbol_selector_agent = SymbolSelectorAgent()
           
         print("  ✅ DataSyncAgent ready")
         print("  ✅ QuantAnalystAgent ready")
         print("  ✅ RiskAuditAgent ready")
         print("  ✅ MultiPeriodParserAgent ready")
         print("  ✅ DecisionCoreAgent ready")
+        print("  ✅ SymbolSelectorAgent ready")
+
+    def initialize(
+        self,
+        symbol_manager: SymbolManager
+    ):
+        self.symbol_manager = symbol_manager
+        self._set_predict_agents_provider()
+        self._set_agents()
 
     def reload(
         self,

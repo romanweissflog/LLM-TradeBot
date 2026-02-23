@@ -16,6 +16,9 @@ from src.utils.action_protocol import is_passive_action
 
 # Input Model
 from pydantic import BaseModel
+
+from src.utils.logger import log
+
 class ControlCommand(BaseModel):
     action: str  # start, pause, stop, restart, set_interval
     interval: float = None  # Optional: interval in minutes for set_interval action
@@ -625,7 +628,7 @@ def _build_default_agent_settings() -> Dict[str, Any]:
 
     # Trend / Setup / Trigger prompts
     try:
-        from src.agents.trend_agent import TrendAgentLLM
+        from src.agents.trend.trend_agent_llm import TrendAgentLLM
         inst = TrendAgentLLM.__new__(TrendAgentLLM)
         defaults["agents"]["trend_agent"] = {
             "params": {"temperature": 0.3, "max_tokens": 300},
@@ -656,8 +659,8 @@ def _build_default_agent_settings() -> Dict[str, Any]:
 
     # Reflection prompt
     try:
-        from src.agents.reflection.reflection_agent import ReflectionAgent
-        inst = ReflectionAgent.__new__(ReflectionAgent)
+        from src.agents.reflection.reflection_agent_llm import ReflectionAgentLLM
+        inst = ReflectionAgentLLM.__new__(ReflectionAgentLLM)
         defaults["agents"]["reflection_agent"] = {
             "params": {"temperature": 0.7, "max_tokens": 1500},
             "system_prompt": inst.get_system_prompt()

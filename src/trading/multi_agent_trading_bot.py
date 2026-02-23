@@ -7,24 +7,19 @@ from datetime import datetime
 from dotenv import load_dotenv
 from typing import Dict, Optional, List, Any
 
-from dataclasses import asdict
-
 from src.config import Config
 
 from src.strategy.llm_engine import StrategyEngine
-from src.agents import PredictResult
-from src.agents import VoteResult
 from src.api.binance_client import BinanceClient
 from src.execution.engine import ExecutionEngine
 from src.risk.manager import RiskManager
 from src.utils.data_saver import DataSaver
 from src.exchanges import AccountManager, ExchangeAccount, ExchangeType  # ✅ Multi-Account Support
 from src.agents.contracts import SuggestedTrade
-from src.utils.semantic_converter import SemanticConverter  # ✅ Global Import
-from src.agents.symbol_selector_agent import get_selector  # 🔝 AUTO3 Support
 from src.agents.runtime_events import emit_global_runtime_event
 from src.utils.helper import get_current_position  # ✅ Global Import
 from src.agents.agent_provider import AgentProvider
+from src.agents.symbol_selector_agent import SymbolSelectorAgent
 
 from src.utils.logger import log
 from src.server.state import global_state
@@ -33,7 +28,7 @@ from .cycle_context import CycleContext
 from .symbol_manager import SymbolManager
 from .ai500_updater import Ai500Updater  # ✅ AI500 Dynamic Updater
 
-from src.runner import (
+from src.runners import (
     RunnerProvider
 )
 
@@ -129,22 +124,22 @@ class MultiAgentTradingBot:
         print(f"  📋 Agent Config: {self.agent_config}")
         global_state.agent_config = self.agent_config.get_enabled_agents()
         self._last_agent_config = dict(global_state.agent_config)
+
+        self.agent_provider = AgentProvider(
+            self.config, 
+            self.agent_config,
+            self.client
+        )
         
         # Symbol manager and ai500 updater
         self.symbol_manager = SymbolManager(
             self.config,
             self.agent_config,
             self.client,
-            self._predict_add_callback,
             test_mode)
         self.ai500_updater = Ai500Updater(self.symbol_manager)  # ✅ AI500 Updater
 
-        self.agent_provider = AgentProvider(
-            self.config, 
-            self.agent_config,
-            self.client,
-            self.symbol_manager
-        )
+        self.agent_provider.initialize(self.symbol_manager)
         
         # 🧠 DeepSeek 决策引擎
         print("[DEBUG] Creating StrategyEngine...")
@@ -235,7 +230,7 @@ class MultiAgentTradingBot:
             
             # Reflection Agent
             if self.agent_provider.reflection_agent:
-                prompt = self.agent_provider.reflection_agent.build_system_prompt()
+                prompt = self.agent_provider.reflection_agent.get_system_prompt()
                 if prompt:
                     prompts["reflection_agent"] = prompt
             
@@ -270,9 +265,6 @@ class MultiAgentTradingBot:
             # Refresh LLM metadata in case config changed
             self._update_llm_metadata()
     
-    def _predict_add_callback(self, symbol: str, horizon: str = '30m'):
-        self.agent_provider.predict_agents_provider.add_agent_for_symbol(symbol, horizon=horizon)
-
     def _sync_open_positions_to_trade_history(self) -> None:
         """Ensure open positions appear in trade history for the UI."""
         def has_open_record(symbol: str) -> bool:
@@ -378,15 +370,15 @@ class MultiAgentTradingBot:
         self._last_agent_config = dict(normalized_agents)
         global_state.agent_config = normalized_agents
 
-        self.agent_provider.reload()
+        self.agent_provider.reload(self.client)
 
-    async def _resolve_auto3_symbols(self):
+    async def resolve_auto3_symbols(self):
         """
         🔝 AUTO3 Dynamic Resolution via Backtest
         
         Gets AI500 Top 5 by volume, backtests each, and selects top 2
         """
-        selector = get_selector()
+        selector = self.agent_provider.symbol_selector_agent
         account_equity = self.client.get_account_equity_estimate()
         if hasattr(selector, 'account_equity') and account_equity:
             selector.account_equity = account_equity
@@ -1265,13 +1257,7 @@ class MultiAgentTradingBot:
                     current_interval = global_state.cycle_interval
                     wait_seconds = current_interval * 60
 
-                    # Run symbol selector on schedule (every 10 minutes, skip if holding positions)
-                    # Note: symbol_manager.run_symbol_selector also has internal position check for safety
-                    has_positions = bool(self.symbol_manager.get_active_position_symbols())
-                    if ((time.time() - self.selector_last_run) >= self.selector_interval_sec
-                            and global_state.execution_mode == "Running"
-                            and not has_positions):
-                        self.symbol_manager.run_symbol_selector(reason="scheduled")
+                    self.symbol_manager.run_symbol_selector(reason="scheduled")
                     
                     # 如果已经等待足够时间，结束等待
                     if elapsed_seconds >= wait_seconds:

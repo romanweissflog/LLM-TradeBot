@@ -2,16 +2,19 @@ import os
 import time
 import asyncio
 
-from typing import List
+from typing import List, TYPE_CHECKING
 from datetime import datetime
 
 from src.api.binance_client import BinanceClient
 from src.config import Config
 from src.agents.agent_config import AgentConfig
 
-from src.agents.symbol_selector_agent import get_selector  # 🔝 AUTO3 Support
 from src.utils.logger import log
 from src.server.state import global_state
+
+
+if TYPE_CHECKING:
+    from src.agents.agent_provider import AgentProvider
 
 class SymbolManager:
     def __init__(
@@ -19,10 +22,10 @@ class SymbolManager:
         config: Config,
         agent_config: AgentConfig,
         client: BinanceClient,
-        predict_add_callback,
+        agent_provider: "AgentProvider",
         test_mode: bool = False
     ):
-        self.predict_add_callback = predict_add_callback
+        self.agent_provider = agent_provider
         self.test_mode = test_mode
         self.client = client
         self._symbols = []
@@ -220,10 +223,19 @@ class SymbolManager:
             return
         
         now_ts = time.time()
+        active_symbols = self.get_active_position_symbols()
+        has_positions = bool(active_symbols)
+        
+        # Run symbol selector on schedule (every 10 minutes, skip if holding positions)
+        # Note: symbol_manager.run_symbol_selector also has internal position check for safety
+        if ((now_ts - self.selector_last_run) < self.selector_interval_sec
+            or global_state.execution_mode != "Running"
+            or has_positions):
+            return
+        
         if reason != "startup" and self.selector_last_run > 0 and (now_ts - self.selector_last_run) < self.selector_interval_sec:
             return
 
-        active_symbols = self.get_active_position_symbols()
         if active_symbols:
             locked = [s for s in self._symbols if s in active_symbols]
             if not locked:
@@ -239,16 +251,15 @@ class SymbolManager:
         try:
             log.info(f"🎰 SymbolSelectorAgent ({reason}) running before analysis...")
             global_state.add_log(f"[🎰 SELECTOR] Symbol selection started ({reason})")
-            selector = get_selector()
             account_equity = self.client.get_account_equity_estimate()
-            if hasattr(selector, 'account_equity') and account_equity:
-                selector.account_equity = account_equity
+            if hasattr(self.agent_provider.symbol_selector_agent, 'account_equity') and account_equity:
+                self.agent_provider.symbol_selector_agent.account_equity = account_equity
             if self.use_auto3:
                 top_symbols = asyncio.run(
-                    selector.select_top3(force_refresh=False, account_equity=account_equity))
+                    self.agent_provider.symbol_selector_agent.select_top3(force_refresh=False, account_equity=account_equity))
             else:
                 top_symbols = asyncio.run(
-                    selector.select_auto1_recent_momentum(account_equity=account_equity)
+                    self.agent_provider.symbol_selector_agent.select_auto1_recent_momentum(account_equity=account_equity)
                 ) or []
 
             if top_symbols:
@@ -267,7 +278,7 @@ class SymbolManager:
                 }
 
                 if not self.use_auto3:
-                    auto1 = getattr(selector, "last_auto1", {}) or {}
+                    auto1 = getattr(self.agent_provider.symbol_selector_agent, "last_auto1", {}) or {}
                     metrics = auto1.get("results", {}).get(self._current_symbol, {})
                     change_pct = metrics.get("change_pct")
                     if isinstance(change_pct, (int, float)):
@@ -291,7 +302,7 @@ class SymbolManager:
                 self._update_predict_agents()
 
                 if self.use_auto3:
-                    selector.start_auto_refresh()
+                    self.agent_provider.symbol_selector_agent.start_auto_refresh()
                 log.info(f"✅ SymbolSelectorAgent ready: {', '.join(top_symbols)}")
                 global_state.add_log(f"[🎰 SELECTOR] Selected: {', '.join(top_symbols)}")
                 global_state.add_agent_message(
@@ -387,7 +398,7 @@ class SymbolManager:
 
     def _update_predict_agents(self, horizon='30m'):
         for symbol in self._symbols:
-            self.predict_add_callback(symbol, horizon=horizon)
+            self.agent_provider.predict_agents_provider.add_agent_for_symbol(symbol, horizon=horizon)
 
     def _update_primary(self):
         if self._primary_symbol not in self._symbols:

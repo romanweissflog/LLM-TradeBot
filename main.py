@@ -65,8 +65,6 @@ import uvicorn
 # 导入多Agent
 print("[DEBUG] Importing PredictAgent...")
 from src.agents.predict_agent import PredictAgent
-print("[DEBUG] Importing symbol_selector_agent...")
-from src.agents.symbol_selector_agent import get_selector  # 🔝 AUTO3 Support
 print("[DEBUG] Importing server.app...")
 from src.server.app import app
 print("[DEBUG] Importing global_state...")
@@ -200,7 +198,7 @@ def main():
         
         import asyncio
         loop = asyncio.get_event_loop()
-        top2 = loop.run_until_complete(bot._resolve_auto3_symbols())
+        top2 = loop.run_until_complete(bot.resolve_auto3_symbols())
         
         # Update bot symbols
         bot.symbols = top2
@@ -209,13 +207,12 @@ def main():
 
         # Ensure PredictAgent exists for AUTO3 symbols
         for symbol in bot.symbols:
-            if symbol not in bot.predict_agents:
-                bot.predict_agents[symbol] = PredictAgent(horizon='30m', symbol=symbol)
+            if symbol not in bot.agent_provider.predict_agents_provider.predict_agents:
+                bot.predict_agent_provider.predict_agents[symbol] = PredictAgent(horizon='30m', symbol=symbol)
                 log.info(f"🆕 Initialized PredictAgent for {symbol} (AUTO3)")
         
         # Start auto-refresh thread (12h interval)
-        selector = get_selector()
-        selector.start_auto_refresh()
+        bot.agent_provider.symbol_selector_agent.start_auto_refresh()
         
         log.info(f"✅ AUTO3 startup complete: {', '.join(top2)}")
         log.info("🔄 Auto-refresh started (12h interval)")

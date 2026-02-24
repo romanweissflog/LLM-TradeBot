@@ -12,17 +12,20 @@ from src.server.state import global_state
 from src.trading import CycleContext
 
 from .runner_decorators import log_run
+from .four_layer_state_container import FourLayerStateContainer
 
 class FourLayerFilterStageRunner:
     def __init__(
         self,
         config: Config,
         agent_config: AgentConfig,
-        agent_provider: AgentProvider
+        agent_provider: AgentProvider,
+        four_layer_state_container: FourLayerStateContainer
     ):
         self.config = config
         self.agent_config = agent_config
         self.agent_provider = agent_provider
+        self.four_layer_state_container = four_layer_state_container
 
     @log_run
     def run(
@@ -137,6 +140,19 @@ class FourLayerFilterStageRunner:
         oi_divergence_warning = None
         oi_divergence_warn = 15.0
         oi_divergence_block = 60.0
+        trend_scores = context.quant_analysis.get('trend', {}) if isinstance(context.quant_analysis, dict) else {}
+        t_1h = float(trend_scores.get('trend_1h_score', 0) or 0)
+        t_15m = float(trend_scores.get('trend_15m_score', 0) or 0)
+        t_5m = float(trend_scores.get('trend_5m_score', 0) or 0)
+        strong_trend_alignment = (
+            (trend_1h == 'long' and t_1h >= 40 and t_15m >= 20 and t_5m >= 10)
+            or
+            (trend_1h == 'short' and t_1h <= -40 and t_15m <= -20 and t_5m <= -10)
+        )
+        if strong_trend_alignment and adx_value >= 28:
+            oi_divergence_warn = 25.0
+            oi_divergence_block = 100.0
+            four_layer_result['trend_continuation_mode'] = True
 
         if trend_1h == 'neutral':
             four_layer_result['blocking_reason'] = 'No clear 1h trend (EMA 20/60)'
@@ -242,9 +258,17 @@ class FourLayerFilterStageRunner:
 
                     if trend_1h == 'long':
                         if close_15m > bb_upper or kdj_j > 80:
-                            setup_ready = False
-                            four_layer_result['blocking_reason'] = f"15m overbought (J={kdj_j:.0f}) - wait for pullback"
-                            log.info("⏳ Layer 3 WAIT: Overbought - waiting for pullback")
+                            if strong_trend_alignment and adx_value >= 30 and kdj_j <= 88 and abs(oi_change) >= 2:
+                                setup_ready = True
+                                four_layer_result['setup_quality'] = 'MOMENTUM_CONTINUATION'
+                                four_layer_result['setup_override'] = 'overbought_but_strong_trend'
+                                log.info(
+                                    f"⚡ Layer 3 OVERRIDE: Overbought but strong trend continuation (ADX={adx_value:.0f}, J={kdj_j:.0f})"
+                                )
+                            else:
+                                setup_ready = False
+                                four_layer_result['blocking_reason'] = f"15m overbought (J={kdj_j:.0f}) - wait for pullback"
+                                log.info("⏳ Layer 3 WAIT: Overbought - waiting for pullback")
                         elif close_15m < bb_middle or kdj_j < 50:
                             setup_ready = True
                             four_layer_result['setup_quality'] = 'IDEAL'
@@ -255,9 +279,17 @@ class FourLayerFilterStageRunner:
                             log.info(f"✅ Layer 3 READY: Acceptable mid-range entry (J={kdj_j:.0f})")
                     elif trend_1h == 'short':
                         if close_15m < bb_lower or kdj_j < 20:
-                            setup_ready = False
-                            four_layer_result['blocking_reason'] = f"15m oversold (J={kdj_j:.0f}) - wait for rally"
-                            log.info("⏳ Layer 3 WAIT: Oversold - waiting for rally")
+                            if strong_trend_alignment and adx_value >= 30 and kdj_j >= 12 and abs(oi_change) >= 2:
+                                setup_ready = True
+                                four_layer_result['setup_quality'] = 'MOMENTUM_CONTINUATION'
+                                four_layer_result['setup_override'] = 'oversold_but_strong_trend'
+                                log.info(
+                                    f"⚡ Layer 3 OVERRIDE: Oversold but strong trend continuation (ADX={adx_value:.0f}, J={kdj_j:.0f})"
+                                )
+                            else:
+                                setup_ready = False
+                                four_layer_result['blocking_reason'] = f"15m oversold (J={kdj_j:.0f}) - wait for rally"
+                                log.info("⏳ Layer 3 WAIT: Oversold - waiting for rally")
                         elif close_15m > bb_middle or kdj_j > 50:
                             setup_ready = True
                             four_layer_result['setup_quality'] = 'IDEAL'
@@ -278,10 +310,21 @@ class FourLayerFilterStageRunner:
 
                     if self.agent_config.trigger_detector_agent:
                         df_5m = context.processed_dfs['5m']
-                        trigger_result = self.agent_provider.trigger_detector_agent.detect_trigger(df_5m, direction=trend_1h)
+                        trigger_sensitivity = self._get_trigger_sensitivity(
+                            symbol=context.symbol,
+                            trend_1h=trend_1h,
+                            adx=float(adx_value or 0),
+                            strong_trend_alignment=strong_trend_alignment
+                        )
+                        trigger_result = self.agent_provider.trigger_detector_agent.detect_trigger(
+                            df_5m,
+                            direction=trend_1h,
+                            sensitivity=trigger_sensitivity
+                        )
                         four_layer_result['trigger_pattern'] = trigger_result.get('pattern_type') or 'None'
                         rvol = trigger_result.get('rvol', 1.0)
                         four_layer_result['trigger_rvol'] = rvol
+                        four_layer_result['trigger_sensitivity'] = trigger_sensitivity
 
                         if rvol < 0.5:
                             log.warning(f"⚠️ Low Volume Warning (RVOL {rvol:.1f}x < 0.5) - Trend validation may be unreliable")
@@ -339,3 +382,54 @@ class FourLayerFilterStageRunner:
             }
         )
         return regime_result, four_layer_result, trend_1h
+
+    def _get_trigger_state_key(self, symbol: str, trend_1h: str) -> str:
+        return f"{str(symbol or 'UNKNOWN').upper()}::{str(trend_1h or 'neutral').lower()}"
+
+    def _get_trigger_sensitivity(self, *, symbol: str, trend_1h: str, adx: float, strong_trend_alignment: bool) -> float:
+        """
+        Adaptive trigger sensitivity for Layer4.
+        <1.0 => easier trigger (after long wait), >1.0 => stricter trigger.
+        """
+        key = self._get_trigger_state_key(symbol, trend_1h)
+        state = self.four_layer_state_container.layer4_adaptive_state.get(key, {})
+        wait_streak = int(state.get('wait_streak', 0) or 0)
+        trigger_streak = int(state.get('trigger_streak', 0) or 0)
+
+        sensitivity = 1.0
+        if wait_streak >= 16:
+            sensitivity = 0.82
+        elif wait_streak >= 10:
+            sensitivity = 0.88
+        elif wait_streak >= 6:
+            sensitivity = 0.94
+
+        if strong_trend_alignment and adx >= 28:
+            sensitivity = min(sensitivity, 0.9)
+
+        # If triggers are firing too frequently, slightly tighten.
+        if trigger_streak >= 4 and wait_streak == 0:
+            sensitivity = min(1.08, sensitivity + 0.06)
+
+        return max(0.78, min(1.12, float(sensitivity)))
+
+    def _update_trigger_adaptive_state(self, *, symbol: str, trend_1h: str, layer4_pass: bool) -> Dict[str, int]:
+        """Track per-symbol per-direction Layer4 streaks for adaptive sensitivity."""
+        key = self._get_trigger_state_key(symbol, trend_1h)
+        state = self.four_layer_state_container.layer4_adaptive_state.get(key, {"wait_streak": 0, "trigger_streak": 0})
+        wait_streak = int(state.get("wait_streak", 0) or 0)
+        trigger_streak = int(state.get("trigger_streak", 0) or 0)
+
+        if layer4_pass:
+            trigger_streak = min(50, trigger_streak + 1)
+            wait_streak = 0
+        else:
+            wait_streak = min(200, wait_streak + 1)
+            trigger_streak = 0
+
+        updated = {"wait_streak": wait_streak, "trigger_streak": trigger_streak}
+        self.four_layer_state_container.layer4_adaptive_state[key] = updated
+        # Keep compatibility counters for legacy logging/inspection.
+        self.four_layer_state_container.layer4_wait_streak = wait_streak
+        self.four_layer_state_container.layer4_trigger_streak = trigger_streak
+        return updated

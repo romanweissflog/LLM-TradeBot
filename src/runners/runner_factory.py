@@ -19,6 +19,7 @@ from .post_filter_stage_runner import PostFilterStageRunner
 from .risk_audit_stage_runner import RiskAuditStageRunner
 from .semantic_analysis_runner import SemanticAnalysisRunner
 from .four_layer_filter_stage_runner import FourLayerFilterStageRunner
+from .four_layer_state_container import FourLayerStateContainer
 
 class RunnerFactory:
     def __init__(
@@ -38,6 +39,7 @@ class RunnerFactory:
         self.agent_provider = agent_provider
         self.client = client
         self.trading_parameters = trading_parameters
+        self._four_layer_state_container = FourLayerStateContainer()    # needs to be persistent
 
     @property
     def action_pipeline_stage_runner(self) -> ActionPipelineStageRunner:
@@ -87,7 +89,8 @@ class RunnerFactory:
         return FourLayerFilterStageRunner(
             self.config,
             self.agent_config,
-            self.agent_provider
+            self.agent_provider,
+            self._four_layer_state_container
         )
     
     @property

@@ -2,7 +2,7 @@ import os
 import time
 import asyncio
 
-from typing import List, TYPE_CHECKING
+from typing import List, Dict, Any, TYPE_CHECKING
 from datetime import datetime
 
 from src.api.binance_client import BinanceClient
@@ -250,15 +250,39 @@ class SymbolManager:
         try:
             log.info(f"🎰 SymbolSelectorAgent ({reason}) running before analysis...")
             global_state.add_log(f"[🎰 SELECTOR] Symbol selection started ({reason})")
+            
+            selector = self.agent_provider.symbol_selector_agent
+            selector_params = self._resolve_symbol_selector_params(selector)
+            self._apply_symbol_selector_runtime_params(selector, selector_params)
+
             account_equity = self.client.get_account_equity_estimate()
-            if hasattr(self.agent_provider.symbol_selector_agent, 'account_equity') and account_equity:
-                self.agent_provider.symbol_selector_agent.account_equity = account_equity
+            if hasattr(selector, 'account_equity') and account_equity:
+                selector.account_equity = account_equity
             if self.use_auto3:
                 top_symbols = asyncio.run(
-                    self.agent_provider.symbol_selector_agent.select_top3(force_refresh=False, account_equity=account_equity))
+                    selector.select_top3(force_refresh=False, account_equity=account_equity))
             else:
                 top_symbols = asyncio.run(
-                    self.agent_provider.symbol_selector_agent.select_auto1_recent_momentum(account_equity=account_equity)
+                    selector.select_auto1_recent_momentum(
+                        account_equity=account_equity,
+                        window_minutes=int(selector_params.get("auto1_window_minutes", selector.AUTO1_WINDOW_MINUTES)),
+                        interval=str(selector_params.get("auto1_interval", selector.AUTO1_INTERVAL)),
+                        threshold_pct=float(selector_params.get("auto1_threshold_pct", selector.AUTO1_THRESHOLD_PCT)),
+                        volume_ratio_threshold=float(
+                            selector_params.get("auto1_volume_ratio_threshold", selector.AUTO1_VOLUME_RATIO_THRESHOLD)
+                        ),
+                        min_adx=float(selector_params.get("auto1_min_adx", selector.AUTO1_MIN_ADX)),
+                        candidate_top_n=int(
+                            selector_params.get("auto1_candidate_top_n", selector.AUTO1_CANDIDATE_TOP_N)
+                        ),
+                        min_directional_score=float(
+                            selector_params.get("auto1_min_directional_score", selector.AUTO1_MIN_DIRECTIONAL_SCORE)
+                        ),
+                        min_alignment_score=float(
+                            selector_params.get("auto1_min_alignment_score", selector.AUTO1_MIN_ALIGNMENT_SCORE)
+                        ),
+                        relax_factor=float(selector_params.get("auto1_relax_factor", selector.AUTO1_RELAX_FACTOR))
+                    )
                 ) or []
 
             if top_symbols:
@@ -277,8 +301,8 @@ class SymbolManager:
                 }
 
                 if not self.use_auto3:
-                    auto1 = getattr(self.agent_provider.symbol_selector_agent, "last_auto1", {}) or {}
-                    metrics = auto1.get("results", {}).get(self._current_symbol, {})
+                    auto1 = getattr(selector, "last_auto1", {}) or {}
+                    metrics = auto1.get("results", {}).get(self.current_symbol, {})
                     change_pct = metrics.get("change_pct")
                     if isinstance(change_pct, (int, float)):
                         if change_pct > 0:
@@ -294,7 +318,57 @@ class SymbolManager:
                     score = metrics.get("score")
                     if isinstance(score, (int, float)):
                         selector_payload["score"] = score
+                    adx = metrics.get("adx")
+                    if isinstance(adx, (int, float)):
+                        selector_payload["adx"] = adx
+                    alignment_score = metrics.get("alignment_score")
+                    if isinstance(alignment_score, (int, float)):
+                        selector_payload["alignment_score"] = alignment_score
+                    impulse_ratio = metrics.get("impulse_ratio")
+                    if isinstance(impulse_ratio, (int, float)):
+                        selector_payload["impulse_ratio"] = impulse_ratio
+                    freshness_score = metrics.get("freshness_score")
+                    if isinstance(freshness_score, (int, float)):
+                        selector_payload["freshness_score"] = freshness_score
+                    directional_edge = metrics.get("directional_range_position")
+                    if isinstance(directional_edge, (int, float)):
+                        selector_payload["directional_edge"] = directional_edge
+
+                    all_metrics = auto1.get("results", {})
+                    if isinstance(all_metrics, dict) and all_metrics:
+                        def _safe_float(value: Any, default: float = 0.0) -> float:
+                            try:
+                                return float(value)
+                            except (TypeError, ValueError):
+                                return float(default)
+
+                        ranked = []
+                        for sym, item in all_metrics.items():
+                            if not isinstance(item, dict):
+                                continue
+                            item_change = _safe_float(item.get("change_pct", 0) or 0)
+                            item_score = _safe_float(item.get("score", 0) or 0)
+                            if item_change > 0:
+                                item_dir = "UP"
+                            elif item_change < 0:
+                                item_dir = "DOWN"
+                            else:
+                                item_dir = "FLAT"
+                            ranked.append({
+                                "symbol": sym,
+                                "direction": item_dir,
+                                "change_pct": item_change,
+                                "score": item_score,
+                                "volume_ratio": _safe_float(item.get("volume_ratio", 0) or 0),
+                                "alignment_score": _safe_float(item.get("alignment_score", 0) or 0),
+                                "impulse_ratio": _safe_float(item.get("impulse_ratio", 0) or 0),
+                                "freshness_score": _safe_float(item.get("freshness_score", 0) or 0),
+                                "directional_edge": _safe_float(item.get("directional_range_position", 0) or 0),
+                            })
+                        ranked.sort(key=lambda x: x.get("score", 0), reverse=True)
+                        selector_payload["ranked_candidates"] = ranked[:5]
                     selector_payload["window_minutes"] = auto1.get("window_minutes")
+                    selector_payload["threshold_pct"] = auto1.get("threshold_pct")
                 global_state.symbol_selector = selector_payload
                 self._update_primary()
 
@@ -319,6 +393,95 @@ class SymbolManager:
             self.selector_last_run = selector_started
             if reason == "startup":
                 self.selector_startup_done = True
+
+    def _get_agent_setting_params(self, agent_key: str) -> Dict[str, Any]:
+        """Load agent params from shared runtime state; fallback to config/agent_settings.json."""
+        settings = getattr(global_state, "agent_settings", None) or {}
+        agents = settings.get("agents", {}) if isinstance(settings, dict) else {}
+        if isinstance(agents, dict):
+            node = agents.get(agent_key, {})
+            if isinstance(node, dict):
+                params = node.get("params", {})
+                if isinstance(params, dict):
+                    return dict(params)
+
+        settings_path = os.path.join(os.path.dirname(__file__), "config", "agent_settings.json")
+        try:
+            with open(settings_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                global_state.agent_settings = data
+                node = (data.get("agents", {}) or {}).get(agent_key, {})
+                if isinstance(node, dict):
+                    params = node.get("params", {})
+                    if isinstance(params, dict):
+                        return dict(params)
+        except Exception:
+            pass
+        return {}
+
+    def _resolve_symbol_selector_params(self, selector: Any) -> Dict[str, Any]:
+        """Resolve symbol-selector params from runtime settings with safe defaults."""
+        params = self._get_agent_setting_params("symbol_selector")
+
+        def _num(name: str, default: float) -> float:
+            try:
+                return float(params.get(name, default))
+            except (TypeError, ValueError):
+                return float(default)
+
+        def _int(name: str, default: int, lower: int = 1) -> int:
+            try:
+                return max(lower, int(params.get(name, default)))
+            except (TypeError, ValueError):
+                return max(lower, int(default))
+
+        interval = str(params.get("auto1_interval", getattr(selector, "AUTO1_INTERVAL", "1m")) or "1m")
+        return {
+            "refresh_interval_hours": _int("refresh_interval_hours", int(getattr(selector, "refresh_interval", 6))),
+            "lookback_hours": _int("lookback_hours", int(getattr(selector, "lookback_hours", 24))),
+            "auto1_window_minutes": _int("auto1_window_minutes", int(getattr(selector, "AUTO1_WINDOW_MINUTES", 30))),
+            "auto1_threshold_pct": _num("auto1_threshold_pct", float(getattr(selector, "AUTO1_THRESHOLD_PCT", 0.8))),
+            "auto1_interval": interval,
+            "auto1_volume_ratio_threshold": _num(
+                "auto1_volume_ratio_threshold",
+                float(getattr(selector, "AUTO1_VOLUME_RATIO_THRESHOLD", 1.2))
+            ),
+            "auto1_min_adx": _num("auto1_min_adx", float(getattr(selector, "AUTO1_MIN_ADX", 20))),
+            "auto1_candidate_top_n": _int(
+                "auto1_candidate_top_n",
+                int(getattr(selector, "AUTO1_CANDIDATE_TOP_N", 15)),
+                lower=3
+            ),
+            "auto1_min_directional_score": _num(
+                "auto1_min_directional_score",
+                float(getattr(selector, "AUTO1_MIN_DIRECTIONAL_SCORE", 2.0))
+            ),
+            "auto1_min_alignment_score": _num(
+                "auto1_min_alignment_score",
+                float(getattr(selector, "AUTO1_MIN_ALIGNMENT_SCORE", 0.0))
+            ),
+            "auto1_relax_factor": _num(
+                "auto1_relax_factor",
+                float(getattr(selector, "AUTO1_RELAX_FACTOR", 0.75))
+            ),
+            "min_quote_volume": _num("min_quote_volume", float(getattr(selector, "min_quote_volume", 5_000_000))),
+            "min_price": _num("min_price", float(getattr(selector, "min_price", 0.05))),
+            "min_quote_volume_per_usdt": _num(
+                "min_quote_volume_per_usdt",
+                float(getattr(selector, "min_quote_volume_per_usdt", 3000))
+            )
+        }
+
+    def _apply_symbol_selector_runtime_params(self, selector: Any, selector_params: Dict[str, Any]) -> None:
+        """Apply selector params immediately so dashboard tuning takes effect in-cycle."""
+        selector.refresh_interval = int(selector_params.get("refresh_interval_hours", selector.refresh_interval))
+        selector.lookback_hours = int(selector_params.get("lookback_hours", selector.lookback_hours))
+        selector.min_quote_volume = float(selector_params.get("min_quote_volume", selector.min_quote_volume))
+        selector.min_price = float(selector_params.get("min_price", selector.min_price))
+        selector.min_quote_volume_per_usdt = float(
+            selector_params.get("min_quote_volume_per_usdt", selector.min_quote_volume_per_usdt)
+        )
 
     def get_active_position_symbols(self) -> List[str]:
         """Return symbols with active positions (test + live)."""

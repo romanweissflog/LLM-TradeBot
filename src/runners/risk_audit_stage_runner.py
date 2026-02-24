@@ -1,6 +1,6 @@
 import asyncio
 
-from typing import Dict, Optional, Any, Tuple
+from typing import Dict, Optional, Any, Tuple, List
 
 from uvicorn import Config
 
@@ -191,6 +191,22 @@ class RiskAuditStageRunner:
             'trend_15m_score': trend_data.get('trend_15m_score', 0),
             'trend_5m_score': trend_data.get('trend_5m_score', 0)
         }
+        four_layer = getattr(global_state, 'four_layer_result', {}) or {}
+        if isinstance(four_layer, dict):
+            order_params['four_layer'] = {
+                'layer1_pass': bool(four_layer.get('layer1_pass')),
+                'layer2_pass': bool(four_layer.get('layer2_pass')),
+                'layer3_pass': bool(four_layer.get('layer3_pass')),
+                'layer4_pass': bool(four_layer.get('layer4_pass')),
+                'final_action': four_layer.get('final_action', 'wait'),
+                'trigger_pattern': four_layer.get('trigger_pattern'),
+                'setup_quality': four_layer.get('setup_quality'),
+                'setup_override': four_layer.get('setup_override'),
+                'trend_continuation_mode': bool(four_layer.get('trend_continuation_mode')),
+                'adx': four_layer.get('adx'),
+                'oi_change': four_layer.get('oi_change'),
+                'trigger_rvol': four_layer.get('trigger_rvol'),
+            }
 
         try:
             if self.agent_config.position_analyzer_agent:
@@ -211,11 +227,9 @@ class RiskAuditStageRunner:
     def _get_symbol_trade_stats(self, symbol: str, max_trades: int = 5) -> Dict:
         """Summarize recent closed trades for symbol to support risk filters."""
         history = global_state.trade_history or []
-        loss_streak = 0
-        loss_streak_active = True
-        recent_pnl = 0.0
-        recent_count = 0
-        recent_wins = 0
+        closed_pnls: List[float] = []
+        long_pnls: List[float] = []
+        short_pnls: List[float] = []
 
         for trade in history:
             if trade.get('symbol') != symbol:
@@ -241,27 +255,45 @@ class RiskAuditStageRunner:
             except Exception:
                 continue
 
-            if loss_streak_active:
-                if pnl_value < 0:
+            closed_pnls.append(pnl_value)
+            normalized_action = normalize_action(str(trade.get('action', '')).lower())
+            if normalized_action == 'open_long':
+                long_pnls.append(pnl_value)
+            elif normalized_action == 'open_short':
+                short_pnls.append(pnl_value)
+
+        def _calc_bucket_stats(pnls: List[float]) -> Tuple[int, float, int, Optional[float]]:
+            loss_streak = 0
+            for value in pnls:
+                if value < 0:
                     loss_streak += 1
                 else:
-                    loss_streak_active = False
+                    break
 
-            if recent_count < max_trades:
-                recent_pnl += pnl_value
-                recent_count += 1
-                if pnl_value > 0:
-                    recent_wins += 1
+            recent = pnls[:max_trades]
+            recent_count = len(recent)
+            recent_pnl = float(sum(recent)) if recent else 0.0
+            wins = sum(1 for value in recent if value > 0)
+            win_rate = (wins / recent_count) if recent_count > 0 else None
+            return loss_streak, recent_pnl, recent_count, win_rate
 
-            if not loss_streak_active and recent_count >= max_trades:
-                break
+        loss_streak, recent_pnl, recent_count, win_rate = _calc_bucket_stats(closed_pnls)
+        long_loss_streak, long_recent_pnl, long_recent_count, long_win_rate = _calc_bucket_stats(long_pnls)
+        short_loss_streak, short_recent_pnl, short_recent_count, short_win_rate = _calc_bucket_stats(short_pnls)
 
-        win_rate = (recent_wins / recent_count) if recent_count > 0 else None
         return {
             'symbol_loss_streak': loss_streak,
             'symbol_recent_pnl': recent_pnl,
             'symbol_recent_trades': recent_count,
-            'symbol_win_rate': win_rate
+            'symbol_win_rate': win_rate,
+            'symbol_long_loss_streak': long_loss_streak,
+            'symbol_long_recent_pnl': long_recent_pnl,
+            'symbol_long_recent_trades': long_recent_count,
+            'symbol_long_win_rate': long_win_rate,
+            'symbol_short_loss_streak': short_loss_streak,
+            'symbol_short_recent_pnl': short_recent_pnl,
+            'symbol_short_recent_trades': short_recent_count,
+            'symbol_short_win_rate': short_win_rate,
         }
 
     def _refresh_account_state_for_audit(self) -> float:

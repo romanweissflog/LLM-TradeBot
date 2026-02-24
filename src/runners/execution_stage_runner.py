@@ -3,6 +3,7 @@ from typing import Dict, Optional, Any
 
 from src.utils.data_saver import DataSaver
 from src.agents.runtime_events import emit_global_runtime_event
+from src.utils.helper import get_position_1h_veto_reason
 
 from src.utils.logger import log
 from src.utils.trade_logger import trade_logger
@@ -34,6 +35,16 @@ class ExecutionStageRunner:
         headless_mode: bool
     ) -> Dict[str, Any]:
         """Run order execution stage (test/live) with unified lifecycle events."""
+        veto_reason = get_position_1h_veto_reason(context.order_params)
+        if veto_reason:
+            global_state.add_log(f"[🛡️ EXECUTION_VETO] {veto_reason}")
+            return {
+                'status': 'blocked',
+                'action': context.order_params.get('action', context.vote_result.action),
+                'details': {'reason': veto_reason, 'stage': 'execution_gate'},
+                'current_price': context.current_price
+            }
+        
         emit_global_runtime_event(
             context,
             stream="lifecycle",

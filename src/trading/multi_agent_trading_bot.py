@@ -18,7 +18,7 @@ from src.utils.data_saver import DataSaver
 from src.exchanges import AccountManager, ExchangeAccount, ExchangeType  # ✅ Multi-Account Support
 from src.agents.contracts import SuggestedTrade
 from src.agents.runtime_events import emit_global_runtime_event
-from src.utils.helper import get_current_position  # ✅ Global Import
+from src.utils.helper import get_current_position, get_position_1h_veto_reason
 from src.agents.agent_provider import AgentProvider
 
 from src.utils.logger import log
@@ -598,6 +598,11 @@ class MultiAgentTradingBot:
             current_price = 0.0
         if current_price <= 0:
             return {'status': 'failed', 'action': action, 'details': {'error': 'invalid_price'}}
+        
+        veto_reason = get_position_1h_veto_reason(order_params)
+        if veto_reason:
+            global_state.add_log(f"[🛡️ EXECUTION_VETO] {suggestion_symbol} {action}: {veto_reason}")
+            return {'status': 'blocked', 'action': action, 'details': {'reason': veto_reason, 'stage': 'suggested_execution_gate'}}
 
         if self.trading_parameters.test_mode:
             side = 'LONG' if action == 'open_long' else 'SHORT'
@@ -798,17 +803,17 @@ class MultiAgentTradingBot:
             }
         return stats
 
-    def switch_runtime_mode(self, target_mode: str) -> Dict[str, Any]:
-        """Switch test/live mode at runtime. Safe path: switch while not Running."""
+    def switch_runtime_mode(self, target_mode: str, force_refresh: bool = False) -> Dict[str, Any]:
+        """Switch test/live mode at runtime, or force refresh current mode account state."""
         mode = (target_mode or "").strip().lower()
         if mode not in {"test", "live"}:
             raise ValueError("Invalid mode. Must be 'test' or 'live'.")
 
         current_mode = "test" if self.trading_parameters.test_mode else "live"
-        if mode == current_mode:
+        if mode == current_mode and not force_refresh:
             return {"trading_mode": current_mode, "is_test_mode": self.trading_parameters.test_mode}
 
-        if global_state.execution_mode == "Running":
+        if global_state.execution_mode == "Running" and not force_refresh:
             raise RuntimeError("Please stop or pause the bot before switching mode.")
 
         if mode == "test":
@@ -832,7 +837,10 @@ class MultiAgentTradingBot:
                 wallet=global_state.virtual_balance,
                 pnl=0.0
             )
-            global_state.add_log("🧪 Switched to TEST mode (paper account reset to $1000.00).")
+            if force_refresh and current_mode == "test":
+                global_state.add_log("🧪 TEST mode restarted (paper account reset to $1000.00).")
+            else:
+                global_state.add_log("🧪 Switched to TEST mode (paper account reset to $1000.00).")
             return {"trading_mode": "test", "is_test_mode": True}
 
         # mode == "live"
@@ -882,7 +890,10 @@ class MultiAgentTradingBot:
         global_state.update_account(equity=equity, available=avail, wallet=wallet, pnl=unrealized)
         global_state.init_balance(equity, initial_balance=equity)
         self._sync_open_positions_to_trade_history()
-        global_state.add_log("💰 Switched to LIVE mode.")
+        if force_refresh and current_mode == "live":
+            global_state.add_log("💰 LIVE mode restarted (account balance reloaded).")
+        else:
+            global_state.add_log("💰 Switched to LIVE mode.")
         return {
             "trading_mode": "live",
             "is_test_mode": False,
@@ -1134,12 +1145,23 @@ class MultiAgentTradingBot:
                 
                 # Step 2: 从所有开仓决策中选择信心度最高的一个
                 if all_decisions:
-                    # 按信心度排序
-                    all_decisions.sort(key=lambda x: x.confidence, reverse=True)
+                    # 按置信度 + AUTO1 趋势质量加分排序（加分仅用于优先级微调）
+                    all_decisions.sort(
+                        key=lambda x: x.confidence + self._get_auto1_execution_bonus(x.symbol),
+                        reverse=True
+                    )
                     best_decision = all_decisions[0]
+                    best_bonus = self._get_auto1_execution_bonus(best_decision.symbol)
+                    best_adjusted = best_decision.confidence + best_bonus
                     
-                    print(f"\n🎯 本周期最优开仓机会: {best_decision.symbol} (信心度: {best_decision.confidence:.1f}%)")
-                    global_state.add_log(f"[🎯 SYSTEM] Best: {best_decision.symbol} (Conf: {best_decision.confidence:.1f}%)")
+                    print(
+                        f"\n🎯 本周期最优开仓机会: {best_decision.symbol} "
+                        f"(信心度: {best_decision.confidence:.1f}% | AUTO1加分: +{best_bonus:.1f} | 调整后: {best_adjusted:.1f}%)"
+                    )
+                    global_state.add_log(
+                        f"[🎯 SYSTEM] Best: {best_decision.symbol} "
+                        f"(Conf: {best_decision.confidence:.1f}% + Bonus {best_bonus:.1f} = {best_adjusted:.1f}%)"
+                    )
                     
                     # 只执行最优的一个（直接执行已审计建议，避免重复跑完整流程）
                     try:
@@ -1165,10 +1187,11 @@ class MultiAgentTradingBot:
                     
                     # 如果有其他开仓机会被跳过，记录下来
                     if len(all_decisions) > 1:
-                        skipped = [f"{d.symbol}({d.confidence:.1f}%)" for d in all_decisions[1:]]
+                        skipped = [
+                            f"{d.symbol}({d.confidence:.1f}%+{self._get_auto1_execution_bonus(d.symbol):.1f})"
+                            for d in all_decisions[1:]
+                        ]
                         print(f"  ⏭️  跳过其他机会: {', '.join(skipped)}")
-                        global_state.add_log(f"⏭️  Skipped opportunities: {', '.join(skipped)} (1 position per cycle limit)")
-                
                         global_state.add_log(f"⏭️  Skipped opportunities: {', '.join(skipped)} (1 position per cycle limit)")
                 
                 # 💰 Update Virtual Account PnL (Mark-to-Market)

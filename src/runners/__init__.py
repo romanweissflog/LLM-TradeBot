@@ -1,5 +1,5 @@
-from .runner_provider import RunnerProvider
+from .runner_factory import RunnerFactory
 
 __all__ = [
-    'RunnerProvider'
+    'RunnerFactory'
 ]

@@ -68,7 +68,7 @@ from src.server.app import app
 print("[DEBUG] Importing global_state...")
 from src.server.state import global_state
 print("[DEBUG] Importing MultiAgentTradingBot")
-from src.trading import MultiAgentTradingBot
+from src.trading import MultiAgentTradingBot, TradingParameters
 
 # ✅ [新增] 导入 TradingLogger 以便初始化数据库
 # FIXME: TradingLogger 的 SQLAlchemy 导入会阻塞启动，改为延迟导入
@@ -155,17 +155,21 @@ def main():
         else:
             args.interval = 5.0
             print(f"☁️ Railway mode: Cycle interval set to 5 minutes")
-    
-    
-    # 创建机器人
-    bot = MultiAgentTradingBot(
+      
+    # 交易参数
+    used_kline_limit = int(args.kline_limit) if args.kline_limit and args.kline_limit > 0 else 300
+
+    trading_parameters = TradingParameters(
         max_position_size=args.max_position,
         leverage=args.leverage,
         stop_loss_pct=args.stop_loss,
         take_profit_pct=args.take_profit,
-        test_mode=args.test,
-        kline_limit=args.kline_limit
+        kline_limit=used_kline_limit,
+        test_mode=args.test
     )
+    
+    # 创建机器人
+    bot = MultiAgentTradingBot(trading_parameters)
 
     # Set initial execution mode before dashboard starts
     # Require explicit user action (Start button) to begin trading

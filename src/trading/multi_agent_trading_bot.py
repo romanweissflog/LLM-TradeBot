@@ -2,6 +2,7 @@ import os
 import time
 import asyncio
 import threading
+import logging
 
 from datetime import datetime
 from dotenv import load_dotenv
@@ -19,7 +20,6 @@ from src.agents.contracts import SuggestedTrade
 from src.agents.runtime_events import emit_global_runtime_event
 from src.utils.helper import get_current_position  # ✅ Global Import
 from src.agents.agent_provider import AgentProvider
-from src.agents.symbol_selector_agent import SymbolSelectorAgent
 
 from src.utils.logger import log
 from src.server.state import global_state
@@ -27,16 +27,17 @@ from src.server.state import global_state
 from .cycle_context import CycleContext
 from .symbol_manager import SymbolManager
 from .ai500_updater import Ai500Updater  # ✅ AI500 Dynamic Updater
+from .trading_parameters import TradingParameters
+from .headless_filter import HeadlessFilter
 
-from src.runners import (
-    RunnerProvider
-)
+from src.runners import RunnerFactory
 
 from src.utils.action_protocol import (
     normalize_action,
     is_open_action,
     is_passive_action,
 )
+
 
 class MultiAgentTradingBot:
     """
@@ -52,12 +53,7 @@ class MultiAgentTradingBot:
     
     def __init__(
         self,
-        max_position_size: float = 100.0,
-        leverage: int = 1,
-        stop_loss_pct: float = 1.0,
-        take_profit_pct: float = 2.0,
-        test_mode: bool = False,
-        kline_limit: int = 300
+        trading_parameters: TradingParameters
     ):
         """
         初始化多Agent交易机器人
@@ -72,20 +68,21 @@ class MultiAgentTradingBot:
         print("\n" + "="*80)
         print(f"🤖 AI Trader - DeepSeek LLM Decision Mode")
         print("="*80)
+
+        self.trading_parameters = trading_parameters
+
+        self._headless_mode = False
+        self._headless_filter = HeadlessFilter()
         
         self.config = Config()
-        self.client = BinanceClient(test_mode=test_mode)
+        self.client = BinanceClient(test_mode=trading_parameters.test_mode)
 
-        self.test_mode = test_mode
-        global_state.is_test_mode = test_mode  # Set test mode in global state
+        global_state.is_test_mode = trading_parameters.test_mode  # Set test mode in global state
         global_state.mode_switch_handler = self.switch_runtime_mode
 
         # Cycle logging (DB)
         self._cycle_logger = None
         self._last_cycle_realized_pnl = 0.0
-        
-        # 交易参数
-        used_kline_limit = int(kline_limit) if kline_limit and kline_limit > 0 else 300
         
         # 初始化客户端
         self.risk_manager = RiskManager()
@@ -96,7 +93,7 @@ class MultiAgentTradingBot:
         self.saver.clear_live_data()
 
         # 💰 Persistent Virtual Account (Test Mode)
-        if self.test_mode:
+        if self.trading_parameters.test_mode:
             saved_va = self.saver.load_virtual_account()
             if saved_va:
                 log.info("💰 Found persistent virtual account. Resetting to initial balance for new session.")
@@ -137,7 +134,7 @@ class MultiAgentTradingBot:
             self.agent_config,
             self.client,
             self.agent_provider,
-            test_mode)
+            trading_parameters.test_mode)
         self.ai500_updater = Ai500Updater(self.symbol_manager)  # ✅ AI500 Updater
 
         self.agent_provider.initialize(self.symbol_manager.symbols)
@@ -151,29 +148,24 @@ class MultiAgentTradingBot:
         else:
             print("  ⚠️ DeepSeek StrategyEngine not ready (Awaiting API Key)")
 
-        self.runner_provider = RunnerProvider(
+        self.runner_factory = RunnerFactory(
             self.config,
             self.agent_config,
             self.client,
             self.agent_provider,
             self.strategy_engine,
             self.saver,
-            max_position_size,
-            leverage,
-            stop_loss_pct,
-            take_profit_pct,
-            used_kline_limit,
-            test_mode
+            self.trading_parameters
         )
         
         print(f"\n⚙️  Trading Config:")
         print(f"  - Symbols: {', '.join(self.symbol_manager.symbols)}")
-        print(f"  - Max Position: ${max_position_size:.2f} USDT")
-        print(f"  - Leverage: {leverage}x")
-        print(f"  - Stop Loss: {stop_loss_pct}%")
-        print(f"  - Take Profit: {take_profit_pct}%")
-        print(f"  - Kline Limit: {used_kline_limit}")
-        print(f"  - Test Mode: {'✅ Yes' if test_mode else '❌ No'}")
+        print(f"  - Max Position: ${trading_parameters.max_position_size:.2f} USDT")
+        print(f"  - Leverage: {trading_parameters.leverage}x")
+        print(f"  - Stop Loss: {trading_parameters.stop_loss_pct}%")
+        print(f"  - Take Profit: {trading_parameters.take_profit_pct}%")
+        print(f"  - Kline Limit: {trading_parameters.kline_limit}")
+        print(f"  - Test Mode: {'✅ Yes' if trading_parameters.test_mode else '❌ No'}")
         
         # ✅ Load initial trade history
         recent_trades = self.saver.get_recent_trades(limit=20)
@@ -282,7 +274,7 @@ class MultiAgentTradingBot:
             return False
 
         added = []
-        if self.test_mode:
+        if self.trading_parameters.test_mode:
             for symbol, pos in (global_state.virtual_positions or {}).items():
                 try:
                     qty = float(pos.get('quantity', 0) or 0)
@@ -420,7 +412,7 @@ class MultiAgentTradingBot:
                     enabled=True,
                     api_key=api_key,
                     secret_key=secret_key,
-                    testnet=testnet or self.test_mode
+                    testnet=testnet or self.trading_parameters.test_mode
                 )
                 self.account_manager.add_account(default_account)
                 log.info(f"✅ Created default account: {default_account.account_name}")
@@ -436,7 +428,7 @@ class MultiAgentTradingBot:
     
     def _begin_cycle_context(self, analyze_only: bool) -> CycleContext:
         """Initialize cycle-scoped context and emit system-start observability."""
-        if hasattr(self, '_headless_mode') and self._headless_mode:
+        if self._headless_mode:
             self._terminal_display.print_log(f"🔍 Analyzing {self.symbol_manager.current_symbol}...", "INFO")
         else:
             print(f"\n{'='*80}")
@@ -486,7 +478,7 @@ class MultiAgentTradingBot:
         """
         cycle_context = self._begin_cycle_context(analyze_only)
         try:
-            return await self.runner_provider.cycle_pipeline_runner.run(context=cycle_context)
+            return await self.runner_factory.cycle_pipeline_runner.run(cycle_context, self._headless_mode)
         
         except Exception as e:
             log.error(f"Trading cycle exception: {e}", exc_info=True)
@@ -533,7 +525,7 @@ class MultiAgentTradingBot:
         cycle_realized = realized_total - (self._last_cycle_realized_pnl or 0.0)
         self._last_cycle_realized_pnl = realized_total
 
-        if self.test_mode:
+        if self.trading_parameters.test_mode:
             unrealized = sum(
                 float(pos.get('unrealized_pnl', 0) or 0)
                 for pos in global_state.virtual_positions.values()
@@ -607,7 +599,7 @@ class MultiAgentTradingBot:
         if current_price <= 0:
             return {'status': 'failed', 'action': action, 'details': {'error': 'invalid_price'}}
 
-        if self.test_mode:
+        if self.trading_parameters.test_mode:
             side = 'LONG' if action == 'open_long' else 'SHORT'
             quantity = float(order_params.get('quantity', 0) or 0)
             position_value = quantity * current_price
@@ -704,7 +696,7 @@ class MultiAgentTradingBot:
             是否成功
         """
         try:
-            current_pos = get_current_position(self.client, self.symbol_manager.current_symbol, self.test_mode)
+            current_pos = get_current_position(self.client, self.symbol_manager.current_symbol, self.trading_parameters.test_mode)
             pos_side = current_pos.side if current_pos else None
             action = normalize_action(order_params.get('action'), position_side=pos_side)
             order_params['action'] = action
@@ -812,21 +804,21 @@ class MultiAgentTradingBot:
         if mode not in {"test", "live"}:
             raise ValueError("Invalid mode. Must be 'test' or 'live'.")
 
-        current_mode = "test" if self.test_mode else "live"
+        current_mode = "test" if self.trading_parameters.test_mode else "live"
         if mode == current_mode:
-            return {"trading_mode": current_mode, "is_test_mode": self.test_mode}
+            return {"trading_mode": current_mode, "is_test_mode": self.trading_parameters.test_mode}
 
         if global_state.execution_mode == "Running":
             raise RuntimeError("Please stop or pause the bot before switching mode.")
 
         if mode == "test":
-            if not self.test_mode:
+            if not self.trading_parameters.test_mode:
                 live_active = self._get_active_position_symbols()
                 if live_active:
                     raise RuntimeError(
                         f"Cannot switch to TEST while LIVE positions are open: {', '.join(live_active)}"
                     )
-            self.test_mode = True
+            self.trading_parameters.test_mode = True
             global_state.is_test_mode = True
             global_state.virtual_initial_balance = 1000.0
             global_state.virtual_balance = 1000.0
@@ -844,7 +836,7 @@ class MultiAgentTradingBot:
             return {"trading_mode": "test", "is_test_mode": True}
 
         # mode == "live"
-        self.test_mode = False
+        self.trading_parameters.test_mode = False
         global_state.is_test_mode = False
         # Prevent TEST session realized PnL from leaking into LIVE account display.
         global_state.cumulative_realized_pnl = 0.0
@@ -859,7 +851,7 @@ class MultiAgentTradingBot:
         fresh_api_secret = os.getenv('BINANCE_SECRET_KEY') or os.getenv('BINANCE_API_SECRET')
         
         if not fresh_api_key or not fresh_api_secret:
-            self.test_mode = True
+            self.trading_parameters.test_mode = True
             global_state.is_test_mode = True
             raise RuntimeError("请在设置中配置 Binance API Key 和 Secret Key")
         
@@ -868,14 +860,14 @@ class MultiAgentTradingBot:
         self.config._config['binance']['api_secret'] = fresh_api_secret
         
         # Recreate client on mode switch to pick up latest env/config credentials.
-        self.client = BinanceClient(api_key=fresh_api_key, api_secret=fresh_api_secret, test_mode=self.test_mode)
+        self.client = BinanceClient(api_key=fresh_api_key, api_secret=fresh_api_secret, test_mode=self.trading_parameters.test_mode)
         self.agent_provider.reload(self.client)
-        self.runner_provider.reload(self.client)
+        self.runner_factory.client = self.client
 
         try:
             acc_info = self.client.get_futures_account()
         except Exception as e:
-            self.test_mode = True
+            self.trading_parameters.test_mode = True
             global_state.is_test_mode = True
             raise RuntimeError(f"Failed to fetch live account balance: {e}")
 
@@ -884,7 +876,7 @@ class MultiAgentTradingBot:
         avail = float(acc_info.get('available_balance', 0) or 0.0)
         equity = wallet + unrealized
         if equity <= 0:
-            self.test_mode = True
+            self.trading_parameters.test_mode = True
             global_state.is_test_mode = True
             raise RuntimeError("Fetched live account balance is zero/invalid. Check account/API permissions.")
         global_state.update_account(equity=equity, available=avail, wallet=wallet, pnl=unrealized)
@@ -912,7 +904,7 @@ class MultiAgentTradingBot:
                     time.sleep(1)
                     continue
 
-                if self.test_mode:
+                if self.trading_parameters.test_mode:
                     time.sleep(2)
                     continue
 
@@ -951,38 +943,10 @@ class MultiAgentTradingBot:
         if headless:
             from src.cli.terminal_display import get_display
             self._terminal_display = get_display(self.symbol_manager.symbols)
-            self._terminal_display.print_header(test_mode=self.test_mode)
-            
-            # Configure minimal logging for headless mode using a custom filter
-            # This ensures Web Dashboard mode is not affected
-            import logging
-            
-            class HeadlessFilter(logging.Filter):
-                """Filter to suppress verbose logs only in headless mode"""
-                def filter(self, record):
-                    # Only suppress INFO level logs from specific modules
-                    if record.levelno == logging.INFO:
-                        suppressed_modules = [
-                            'src.features.technical_features',
-                            'src.utils.logger',
-                            'src.agents.data_sync_agent',
-                            'src.agents.trend_agent',
-                            'src.agents.setup_agent',
-                            'src.agents.trigger_agent',
-                            'src.strategy.llm_engine',
-                            'src.models.prophet_model',
-                            'src.server.state',
-                            '__main__'
-                        ]
-                        return record.name not in suppressed_modules
-                    return True  # Allow WARNING and above
+            self._terminal_display.print_header(test_mode=self.trading_parameters.test_mode)
             
             # Add filter to root logger
-            headless_filter = HeadlessFilter()
-            logging.getLogger().addFilter(headless_filter)
-            
-            # Store filter reference for cleanup
-            self._headless_filter = headless_filter
+            logging.getLogger().addFilter(self._headless_filter)
         
         # Logger is configured in src.utils.logger, no need to override here.
         # Dashboard logging is handled via global_state.add_log -> log.bind(dashboard=True)
@@ -994,7 +958,7 @@ class MultiAgentTradingBot:
         from src.models.prophet_model import HAS_LIGHTGBM
         if HAS_LIGHTGBM and self.agent_config.predict_agent:
             self.agent_provider.predict_agents_provider.start_auto_trainer(
-                self.symbol_provider.primary_symbol,
+                self.symbol_manager.primary_symbol,
                 self.symbol_manager.symbols[0] if self.symbol_manager.symbols else None)
         
         # 设置初始间隔 (优先使用 CLI 参数，后续 API 可覆盖)
@@ -1003,7 +967,7 @@ class MultiAgentTradingBot:
         log.info(f"🚀 Starting continuous trading mode (interval: {global_state.cycle_interval}m)")
         
         # 🧪 Test Mode: Initialize Virtual Account for Chart
-        if self.test_mode:
+        if self.trading_parameters.test_mode:
             log.info("🧪 Test Mode: Initializing Virtual Account...")
             initial_balance = global_state.virtual_initial_balance
             current_balance = global_state.virtual_balance
@@ -1095,7 +1059,7 @@ class MultiAgentTradingBot:
                 global_state.clear_agent_events()
 
                 # 🧪 Test Mode: reset per-cycle baseline for PnL display
-                if self.test_mode:
+                if self.trading_parameters.test_mode:
                     baseline = global_state.account_overview.get('total_equity', 0)
                     if not baseline:
                         unrealized = sum(
@@ -1127,7 +1091,7 @@ class MultiAgentTradingBot:
                     global_state.add_log(f"[🔒 SYSTEM] Active position lock: {', '.join(symbols_for_cycle)}")
 
                 # 🧪 Test Mode: Record start of cycle account state (for Net Value Curve)
-                if self.test_mode:
+                if self.trading_parameters.test_mode:
                     # Re-log current state with new cycle number so chart shows start of cycle
                     global_state.update_account(
                         equity=global_state.account_overview['total_equity'],
@@ -1208,14 +1172,14 @@ class MultiAgentTradingBot:
                         global_state.add_log(f"⏭️  Skipped opportunities: {', '.join(skipped)} (1 position per cycle limit)")
                 
                 # 💰 Update Virtual Account PnL (Mark-to-Market)
-                if self.test_mode:
+                if self.trading_parameters.test_mode:
                     self._update_virtual_account_stats(latest_prices)
                 
                 # 🖥️ Headless Mode: Print account summary after each cycle
                 if self._headless_mode:
                     acc = global_state.account_overview
                     # Get current positions
-                    positions = global_state.virtual_positions if self.test_mode else {}
+                    positions = global_state.virtual_positions if self.trading_parameters.test_mode else {}
                     self._terminal_display.print_account_summary(
                         equity=acc['total_equity'],
                         available=acc['available_balance'],
@@ -1287,9 +1251,7 @@ class MultiAgentTradingBot:
                 self._terminal_display.print_shutdown(stats)
                 
                 # Clean up headless filter
-                import logging
-                if hasattr(self, '_headless_filter'):
-                    logging.getLogger().removeFilter(self._headless_filter)
+                logging.getLogger().removeFilter(self._headless_filter)
             else:
                 print(f"\n\n⚠️  收到停止信号，退出...")
             global_state.is_running = False
@@ -1298,7 +1260,7 @@ class MultiAgentTradingBot:
         """
         [Test Mode] 更新虚拟账户统计 (权益、PnL) 并推送到 Global State
         """
-        if not self.test_mode:
+        if not self.trading_parameters.test_mode:
             return
 
         total_unrealized_pnl = 0.0
@@ -1342,7 +1304,7 @@ class MultiAgentTradingBot:
 
     def _save_virtual_state(self):
         """Helper to persist virtual account state"""
-        if self.test_mode:
+        if self.trading_parameters.test_mode:
             self.saver.save_virtual_account(
                 balance=global_state.virtual_balance,
                 positions=global_state.virtual_positions

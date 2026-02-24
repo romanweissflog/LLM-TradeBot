@@ -43,7 +43,8 @@ class DecisionStageRunner:
     @log_run
     async def run(
         self,
-        context: CycleContext
+        context: CycleContext,
+        headless_mode: bool
     ) -> Tuple[Dict[str, Any], str, Optional[Dict[str, Any]], Any, Dict[str, Any]]:
         """
         Build final decision payload (forced-exit/fast/LLM/rule) and convert to VoteResult.
@@ -101,6 +102,9 @@ class DecisionStageRunner:
             fast_confidence = fast_signal['confidence']
             fast_reason = f"30m trend {change_pct:+.2f}% | RVOL {volume_ratio:.2f}x"
 
+            if not headless_mode:
+                print("[Step 3/5] ⚡ Fast Trend Trigger - Immediate entry signal")
+
             global_state.add_log(f"[⚡ FAST] {fast_action.upper()} | {fast_reason}")
 
             if fast_action == 'open_long':
@@ -145,6 +149,9 @@ class DecisionStageRunner:
             )
         elif not forced_exit:
             if llm_enabled:
+                if not headless_mode:
+                    print("[Step 3/5] 🧠 DeepSeek LLM - Making decision...")
+
                 global_state.add_agent_message("decision_core", "🧠 DeepSeek LLM is weighing options...", level="info")
 
                 market_context_text = self._build_market_context(
@@ -219,6 +226,9 @@ class DecisionStageRunner:
                     level="info"
                 )
             else:
+                if not headless_mode:
+                    print("[Step 3/5] ⚖️ DecisionCore - Rule-based decision...")
+
                 global_state.add_agent_message("decision_core", "⚖️ Running rule-based decision logic...", level="info")
                 decision_source = 'decision_core'
                 vote_core = await self.agent_provider.decision_core.make_decision(

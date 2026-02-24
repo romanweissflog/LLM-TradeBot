@@ -1,5 +1,3 @@
-from typing import TYPE_CHECKING
-
 from src.agents.runtime_events import emit_global_runtime_event
 from src.agents.agent_provider import AgentProvider
 
@@ -10,22 +8,22 @@ from src.trading import CycleContext
 
 from .runner_decorators import log_run
 
-if TYPE_CHECKING:
-    from .runner_provider import RunnerProvider
+from .semantic_analysis_runner import SemanticAnalysisRunner
 
 class PostFilterStageRunner:
     def __init__(
         self,
         agent_provider: AgentProvider,
-        runner_provider: "RunnerProvider"
+        semantic_analysis_runner: SemanticAnalysisRunner
     ):
         self.agent_provider = agent_provider  
-        self.runner_provider = runner_provider
+        self.semantic_analysis_runner = semantic_analysis_runner
 
     @log_run
     async def run(
         self,
-        context: CycleContext
+        context: CycleContext,
+        headless_mode: bool
     ) -> None:
         """Run semantic agents + multi-period parser after four-layer filtering."""
         emit_global_runtime_event(
@@ -35,7 +33,7 @@ class PostFilterStageRunner:
             phase="start",
         )
         try:
-            await self.runner_provider.semantic_analysis_runner.run(context)
+            await self.semantic_analysis_runner.run(context, headless_mode)
 
             try:
                 multi_period_result = self.agent_provider.multi_period_agent.analyze(

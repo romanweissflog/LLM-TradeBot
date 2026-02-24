@@ -30,7 +30,8 @@ class ExecutionStageRunner:
     @log_run
     async def run(
         self,
-        context: CycleContext
+        context: CycleContext,
+        headless_mode: bool
     ) -> Dict[str, Any]:
         """Run order execution stage (test/live) with unified lifecycle events."""
         emit_global_runtime_event(
@@ -42,8 +43,12 @@ class ExecutionStageRunner:
         )
 
         if self.test_mode:
+            if not headless_mode:
+                print("\n[Step 5/5] 🧪 TestMode - 模拟执行...")
             return self._execute_test_mode_order(context)
 
+        if not headless_mode:
+            print("\n[Step 5/5] 🚀 LiveTrade - 实盘执行...")
         return self._execute_live_mode_order(context)
 
     def _execute_test_mode_order(

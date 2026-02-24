@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Any, TYPE_CHECKING
+from typing import Dict, Optional, Any
 
 from src.utils.logger import log
 from src.server.state import global_state
@@ -10,27 +10,31 @@ from src.utils.data_saver import DataSaver
 
 from .runner_decorators import log_run
 
-if TYPE_CHECKING:
-    from .runner_provider import RunnerProvider
+from .risk_audit_stage_runner import RiskAuditStageRunner
+from .execution_stage_runner import ExecutionStageRunner
 
 class ActionPipelineStageRunner:
     def __init__(
         self,
-        runner_provider: "RunnerProvider",
+        risk_audit_stage_runner: RiskAuditStageRunner,
+        execution_stage_runner: ExecutionStageRunner,
         saver: DataSaver
     ):
-        self.runner_provider = runner_provider
-        self.result_builder = ResultBuilder(
-            saver
-        )
+        self.risk_audit_stage_runner = risk_audit_stage_runner
+        self.execution_stage_runner = execution_stage_runner
+        self.result_builder = ResultBuilder(saver)
     
     @log_run
     async def run(
         self,
-        context: CycleContext
+        context: CycleContext,
+        headless_mode: bool
     ) -> Dict[str, Any]:
+        if not headless_mode:
+            print(f"[Step 4/5] 👮 The Guardian (Risk Audit) - Final review...")
+
         """Run risk-audit -> analyze-only gate -> execution as one stage."""
-        context.order_params, audit_result, context.account_balance, context.current_position = await self.runner_provider.risk_audit_stage_runner.run(context)
+        context.order_params, audit_result, context.account_balance, context.current_position = await self.risk_audit_stage_runner.run(context)
 
         blocked_result = self._finalize_risk_audit_decision(
             context,
@@ -43,7 +47,7 @@ class ActionPipelineStageRunner:
         if analyze_only_result is not None:
             return analyze_only_result
 
-        return await self.runner_provider.execution_stage_runner.run(context)
+        return await self.execution_stage_runner.run(context, headless_mode)
 
     
     def _finalize_risk_audit_decision(

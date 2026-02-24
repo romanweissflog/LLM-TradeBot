@@ -29,7 +29,8 @@ class SemanticAnalysisRunner:
     @log_run
     async def run(
         self,
-        context: CycleContext
+        context: CycleContext,
+        headless_mode: bool
     ) -> Dict[str, Any]:
         """
         Run optional trend/setup/trigger semantic agents and summarize their outputs.
@@ -55,6 +56,9 @@ class SemanticAnalysisRunner:
             global_state.semantic_analyses = {}
             return {}
 
+        if not headless_mode:
+            print("[Step 2.5/5] 🤖 Multi-Agent Semantic Analysis...")
+            
         emit_global_runtime_event(
             context,
             stream="lifecycle",

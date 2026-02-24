@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Any, Tuple, TYPE_CHECKING
+from typing import Dict, Optional, Any, Tuple
 
 from src.utils.data_saver import DataSaver
 
@@ -12,17 +12,16 @@ from src.server.state import global_state
 
 from .runner_decorators import log_run
 
-if TYPE_CHECKING:
-    from .runner_provider import RunnerProvider
+from .parallel_analysis_runner import ParallelAnalysisRunner
 
 class AgentAnalysisStageRunner:
     def __init__(
         self,
-        runner_provider: "RunnerProvider",
+        parallel_analysis_runner: ParallelAnalysisRunner,
         saver: DataSaver
     ):
         self.saver = saver
-        self.runner_provider = runner_provider
+        self.parallel_analysis_runner = parallel_analysis_runner
 
     @log_run
     async def run(
@@ -39,7 +38,7 @@ class AgentAnalysisStageRunner:
         try:
             global_state.add_log(f"[📊 SYSTEM] Parallel analysis started for {context.symbol}")
 
-            quant_analysis, predict_result, reflection_result, reflection_text = await self.runner_provider.parallel_analysis_runner.run(context)
+            quant_analysis, predict_result, reflection_result, reflection_text = await self.parallel_analysis_runner.run(context)
 
             try:
                 df_15m = context.processed_dfs['15m']

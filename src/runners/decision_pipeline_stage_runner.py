@@ -1,6 +1,6 @@
 import os
 
-from typing import Dict, Optional, Any, TYPE_CHECKING
+from typing import Dict, Optional, Any
 from datetime import datetime
 from dataclasses import asdict
 
@@ -13,19 +13,17 @@ from src.utils.action_protocol import (
     is_passive_action,
 )
 
-if TYPE_CHECKING:
-    from .runner_provider import RunnerProvider
-
+from .decision_stage_runner import DecisionStageRunner
 from .runner_decorators import log_run
 
 class DecisionPipelineStageRunner:
     def __init__(
         self,
-        runner_provider: "RunnerProvider",
+        decision_stage_runner: DecisionStageRunner,
         saver: DataSaver,
         test_mode: bool = False
     ):
-        self.runner_provider = runner_provider
+        self.decision_stage_runner = decision_stage_runner
         self.saver = saver
         self.result_builder = ResultBuilder(
             saver
@@ -35,10 +33,11 @@ class DecisionPipelineStageRunner:
     @log_run
     async def run(
         self,
-        context: CycleContext
+        context: CycleContext,
+        headless_mode: bool
     ) -> StageResult:
         """Run decision stage + observability + passive handling."""
-        decision_payload, decision_source, fast_signal, vote_result, selected_agent_outputs = await self.runner_provider.decision_stage_runner.run(context)
+        decision_payload, decision_source, fast_signal, vote_result, selected_agent_outputs = await self.decision_stage_runner.run(context, headless_mode)
 
         self._record_decision_observability(
             symbol=context.symbol,

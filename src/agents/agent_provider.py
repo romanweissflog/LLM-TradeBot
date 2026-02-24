@@ -1,31 +1,22 @@
 from typing import List
 
 from src.config import Config
-from .agent_config import AgentConfig
 from src.api.binance_client import BinanceClient
 
+from .agent_config import AgentConfig
 from .quant_analyst_agent import QuantAnalystAgent
 from .regime_detector_agent import RegimeDetector
 from .multi_period_agent import MultiPeriodParserAgent
 from .symbol_selector_agent import SymbolSelectorAgent
 from .trigger_detector_agent import TriggerDetector
-
 from .data_sync import DataSyncAgent
 from .decision_core import DecisionCoreAgent
 from .predict import PredictAgentsProvider
 from .risk_audit import RiskAuditAgent
-
-from .reflection.reflection_agent_llm import ReflectionAgentLLM
-from .reflection.reflection_agent_no_llm import ReflectionAgentNoLLM
-
-from .trend.trend_agent_llm import TrendAgentLLM
-from .trend.trend_agent_no_llm import TrendAgentNoLLM
-
-from .setup.setup_agent_llm import SetupAgentLLM
-from .setup.setup_agent_no_llm import SetupAgentNoLLM
-
-from .trigger.trigger_agent_llm import TriggerAgentLLM
-from .trigger.trigger_agent_no_llm import TriggerAgentNoLLM
+from .reflection import ReflectionAgentLLM, ReflectionAgentNoLLM
+from .trend import TrendAgentLLM, TrendAgentNoLLM
+from .setup import SetupAgentLLM, SetupAgentNoLLM
+from .trigger import TriggerAgentLLM, TriggerAgentNoLLM
 
 class AgentProvider:
     def __init__(

@@ -4,9 +4,9 @@ from typing import Dict, Optional, Any, TYPE_CHECKING
 from datetime import datetime
 from dataclasses import asdict
 
-from src.trading.stage_result import StageResult
+from src.runners.stage_result import StageResult
 from src.trading import CycleContext
-from src.trading.result_builder import ResultBuilder
+from src.runners.result_builder import ResultBuilder
 from src.utils.data_saver import DataSaver
 from src.server.state import global_state
 from src.utils.action_protocol import (

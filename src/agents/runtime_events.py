@@ -11,7 +11,7 @@ import threading
 import time
 from typing import Any, Dict, Optional
 
-from src.trading.cycle_context import CycleContext
+from src.trading import CycleContext
 
 from src.server.state import global_state
 

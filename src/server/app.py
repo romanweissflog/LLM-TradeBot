@@ -628,7 +628,7 @@ def _build_default_agent_settings() -> Dict[str, Any]:
 
     # Trend / Setup / Trigger prompts
     try:
-        from src.agents.trend.trend_agent_llm import TrendAgentLLM
+        from src.agents.trend import TrendAgentLLM
         inst = TrendAgentLLM.__new__(TrendAgentLLM)
         defaults["agents"]["trend_agent"] = {
             "params": {"temperature": 0.3, "max_tokens": 300},
@@ -648,7 +648,7 @@ def _build_default_agent_settings() -> Dict[str, Any]:
         defaults["agents"]["setup_agent"] = {"params": {"temperature": 0.3, "max_tokens": 300}, "system_prompt": ""}
 
     try:
-        from src.agents.trigger.trigger_agent_llm import TriggerAgentLLM
+        from src.agents.trigger import TriggerAgentLLM
         inst = TriggerAgentLLM.__new__(TriggerAgentLLM)
         defaults["agents"]["trigger_agent"] = {
             "params": {"temperature": 0.3, "max_tokens": 300},

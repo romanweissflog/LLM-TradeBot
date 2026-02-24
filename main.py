@@ -68,7 +68,7 @@ from src.server.app import app
 print("[DEBUG] Importing global_state...")
 from src.server.state import global_state
 print("[DEBUG] Importing MultiAgentTradingBot")
-from src.trading.multi_agent_trading_bot import MultiAgentTradingBot
+from src.trading import MultiAgentTradingBot
 
 # ✅ [新增] 导入 TradingLogger 以便初始化数据库
 # FIXME: TradingLogger 的 SQLAlchemy 导入会阻塞启动，改为延迟导入

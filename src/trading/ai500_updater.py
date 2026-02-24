@@ -32,6 +32,7 @@ class Ai500Updater:
                     
                     if self.use_ai500:
                         log.info("🔄 AI500 Top5 - Starting scheduled update (every 6h)")
+                        old_symbols = set(self.symbols)
                         self.symbol_manager.update_ai500()  # This will fetch new AI500 top5 and update symbols list
                         self.ai500_last_update = time.time()
                         
@@ -43,7 +44,7 @@ class Ai500Updater:
                             log.info(f"📋 Current symbols: {', '.join(self.symbol_manager.symbols)}")
                             for symbol in added:
                                 if symbol not in self.predict_agents:
-                                    from src.agents.predict_agent import PredictAgent
+                                    from src.agents.predict import PredictAgent
                                     self.predict_agents[symbol] = PredictAgent(symbol=symbol)
                                     log.info(f"🆕 Initialized PredictAgent for {symbol}")
                         else:

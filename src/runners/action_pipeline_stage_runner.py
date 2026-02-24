@@ -4,7 +4,7 @@ from src.utils.logger import log
 from src.server.state import global_state
 
 from src.trading import CycleContext
-from src.trading.result_builder import ResultBuilder
+from src.runners.result_builder import ResultBuilder
 
 from src.utils.data_saver import DataSaver
 

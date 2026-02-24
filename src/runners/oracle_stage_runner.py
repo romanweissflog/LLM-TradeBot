@@ -13,8 +13,8 @@ from src.agents.data_sync import MarketSnapshot
 from src.api.binance_client import BinanceClient
 from src.utils.data_saver import DataSaver
 
-from src.trading.stage_result import StageResult
-from src.trading.result_builder import ResultBuilder
+from src.runners.stage_result import StageResult
+from src.runners.result_builder import ResultBuilder
 from src.trading import CycleContext
 
 from src.agents.runtime_events import emit_global_runtime_event

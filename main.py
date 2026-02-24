@@ -23,7 +23,6 @@ Date: 2025-12-19
 # 版本号: v+日期+迭代次数
 VERSION = "v20260111_3"
 
-import asyncio
 import sys
 import os
 from dotenv import load_dotenv
@@ -56,7 +55,6 @@ import json
 import threading
 
 from src.utils.logger import log
-from src.utils.trade_logger import trade_logger
 from src.server.state import global_state
 
 print("[DEBUG] Importing uvicorn...")
@@ -64,7 +62,7 @@ import uvicorn
 
 # 导入多Agent
 print("[DEBUG] Importing PredictAgent...")
-from src.agents.predict_agent import PredictAgent
+from src.agents import PredictAgent
 print("[DEBUG] Importing server.app...")
 from src.server.app import app
 print("[DEBUG] Importing global_state...")

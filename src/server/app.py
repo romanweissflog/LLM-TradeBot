@@ -675,7 +675,7 @@ def _build_default_agent_settings() -> Dict[str, Any]:
         DEFAULT_SYSTEM_PROMPT = ""
 
     try:
-        from src.agents.decision_core_agent import SignalWeight
+        from src.agents.decision_core.decision_core_agent import SignalWeight
         defaults["agents"]["decision_core"] = {
             "params": asdict(SignalWeight()),
             "system_prompt": DEFAULT_SYSTEM_PROMPT

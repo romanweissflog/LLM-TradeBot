@@ -8,10 +8,10 @@ from src.agents.agent_config import AgentConfig
 from src.agents.agent_provider import AgentProvider
 
 from src.utils.data_saver import DataSaver
-from src.agents.reflection.reflection_result import ReflectionResult
+from src.agents.reflection import ReflectionResult
 
-from src.trading.symbol_manager import SymbolManager
-from src.agents.predict_result import PredictResult
+from src.trading import CycleContext
+from src.agents.predict import PredictResult
 
 from src.server.state import global_state
 
@@ -25,31 +25,24 @@ class ParallelAnalysisRunner:
         self,
         config: Config,
         agent_config: AgentConfig,
-        symbol_manager: SymbolManager,
         agent_provider: AgentProvider,
         saver: DataSaver
     ):
         self.config = config
         self.agent_config = agent_config
-        self.symbol_manager = symbol_manager
         self.saver = saver
         self.agent_provider = agent_provider
 
     @log_run
     async def run(
         self,
-        *,
-        run_id: str,
-        cycle_id: Optional[str],
-        snapshot_id: str,
-        market_snapshot,
-        processed_dfs: Dict[str, "pd.DataFrame"]
+        context: CycleContext
     ) -> Tuple[Dict, Optional[PredictResult], Optional[ReflectionResult], Optional[str]]:
         """
         Run quant/predict/reflection in parallel with timeouts and safe fallbacks.
         """
         async def quant_task():
-            res = await self.agent_provider.quant_analyst_agent.analyze_all_timeframes(market_snapshot)
+            res = await self.agent_provider.quant_analyst_agent.analyze_all_timeframes(context.market_snapshot)
             trend_score = res.get('trend', {}).get('total_trend_score', 0)
             osc_score = res.get('oscillator', {}).get('total_osc_score', 0)
             sent_score = res.get('sentiment', {}).get('total_sentiment_score', 0)
@@ -58,9 +51,9 @@ class ParallelAnalysisRunner:
             return res
 
         async def predict_task() -> Optional[PredictResult]:
-            prediction = await self.agent_provider.predict_agents_provider.predict(processed_dfs)
+            prediction = await self.agent_provider.predict_agents_provider.predict(context.symbol, context.processed_dfs)
             if prediction:
-                self.saver.save_prediction(asdict(prediction), self.symbol_manager.current_symbol, snapshot_id, cycle_id=cycle_id)
+                self.saver.save_prediction(asdict(prediction), context.symbol, context.snapshot_id, cycle_id=context.cycle_id)
             return prediction
 
         async def reflection_task() -> Optional[ReflectionResult]:
@@ -88,30 +81,24 @@ class ParallelAnalysisRunner:
 
         analysis_results = await asyncio.gather(
             run_task_with_timeout(
-                run_id=run_id,
-                cycle_id=cycle_id,
+                context,
                 agent_name="quant_analyst",
                 timeout_seconds=quant_timeout,
                 task_factory=quant_task,
-                symbol=self.symbol_manager.current_symbol,
                 fallback={}
             ),
             run_task_with_timeout(
-                run_id=run_id,
-                cycle_id=cycle_id,
+                context,
                 agent_name="predict_agent",
                 timeout_seconds=predict_timeout,
                 task_factory=predict_task,
-                symbol=self.symbol_manager.current_symbol,
                 fallback=None
             ),
             run_task_with_timeout(
-                run_id=run_id,
-                cycle_id=cycle_id,
+                context,
                 agent_name="reflection_agent",
                 timeout_seconds=reflection_timeout,
                 task_factory=reflection_task,
-                symbol=self.symbol_manager.current_symbol,
                 fallback=None
             )
         )

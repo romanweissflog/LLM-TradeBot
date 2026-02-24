@@ -65,34 +65,30 @@ def emit_runtime_event(
 
 
 def emit_global_runtime_event(
+    context: CycleContext,
     *,
-    run_id: str,
     stream: str,
     agent: str,
     phase: str,
-    symbol: str,
-    cycle_id: Optional[str] = None,
     data: Optional[Dict[str, Any]] = None
 ) -> None:
     emit_runtime_event(
         shared_state=global_state,
-        run_id=run_id,
+        run_id=context.run_id,
         stream=stream,
         agent=agent,
         phase=phase,
-        symbol=symbol,
-        cycle_id=cycle_id,
+        symbol=context.symbol,
+        cycle_id=context.cycle_id,
         data=data or {}
     )
     
-def emit_cycle_pipeline_end(*, context: CycleContext, result: Dict[str, Any]) -> None:
+def emit_cycle_pipeline_end(context: CycleContext, *, result: Dict[str, Any]) -> None:
     """Emit cycle_pipeline end event using normalized result payload."""
     emit_global_runtime_event(
-        run_id=context.run_id,
+        context,
         stream="lifecycle",
         agent="cycle_pipeline",
         phase="end",
-        cycle_id=context.cycle_id,
-        symbol=context.symbol,
         data={"status": result.get('status'), "action": result.get('action')}
     )

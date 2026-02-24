@@ -13,7 +13,7 @@ from src.utils.logger import log
 from src.server.state import global_state
 from src.utils.agents_util import get_agent_timeout
 
-from src.trading.symbol_manager import SymbolManager
+from src.trading import CycleContext
 
 from src.agents import (
     AgentProvider,
@@ -32,7 +32,6 @@ class RiskAuditStageRunner:
         config: Config,
         agent_config: AgentConfig,
         client: BinanceClient,
-        symbol_manager: SymbolManager,
         agent_provider: AgentProvider,
         leverage: int,
         stop_loss_pct: float,
@@ -42,7 +41,6 @@ class RiskAuditStageRunner:
         self.config = config
         self.agent_config = agent_config
         self.client = client
-        self.symbol_manager = symbol_manager
         self.agent_provider = agent_provider
         self.leverage = leverage
         self.stop_loss_pct = stop_loss_pct
@@ -52,54 +50,38 @@ class RiskAuditStageRunner:
     @log_run
     async def run(
         self,
-        *,
-        run_id: str,
-        cycle_id: Optional[str],
-        vote_result: Any,
-        quant_analysis: Dict[str, Any],
-        processed_dfs: Dict[str, "pd.DataFrame"],
-        current_price: float,
-        current_position_info: Optional[Dict[str, Any]],
-        regime_result: Optional[Dict[str, Any]]
+        context: CycleContext
     ) -> Tuple[Dict[str, Any], Any, float, Optional[PositionInfo]]:
         """Run guardian audit stage and return order params + audit result."""
         emit_global_runtime_event(
-            run_id=run_id,
+            context,
             stream="lifecycle",
             agent="risk_audit",
             phase="start",
-            cycle_id=cycle_id,
-            symbol=self.symbol_manager.current_symbol
         )
 
-        regime_txt = vote_result.regime.get('regime', 'Unknown') if vote_result.regime else 'Unknown'
+        regime_txt = context.vote_result.regime.get('regime', 'Unknown') if context.vote_result.regime else 'Unknown'
         global_state.add_log(
             f"⚖️ DecisionCoreAgent (The Critic): Context(Regime={regime_txt}) => "
-            f"Vote: {vote_result.action.upper()} (Conf: {vote_result.confidence:.0f}%)"
+            f"Vote: {context.vote_result.action.upper()} (Conf: {context.vote_result.confidence:.0f}%)"
         )
         global_state.guardian_status = "Auditing..."
 
-        order_params = self._build_risk_order_params(
-            vote_result=vote_result,
-            quant_analysis=quant_analysis,
-            processed_dfs=processed_dfs,
-            current_price=current_price,
-            current_position_info=current_position_info
-        )
+        order_params = self._build_risk_order_params(context)
 
-        print(f"  ✅ 信号方向: {vote_result.action}")
-        print(f"  ✅ 综合信心: {vote_result.confidence:.1f}%")
-        if vote_result.regime:
-            print(f"  📊 市场状态: {vote_result.regime['regime']}")
-        if vote_result.position:
+        print(f"  ✅ 信号方向: {context.vote_result.action}")
+        print(f"  ✅ 综合信心: {context.vote_result.confidence:.1f}%")
+        if context.vote_result.regime:
+            print(f"  📊 市场状态: {context.vote_result.regime['regime']}")
+        if context.vote_result.position:
             print(
-                f"  📍 价格位置: {min(max(vote_result.position['position_pct'], 0), 100):.1f}% "
-                f"({vote_result.position['location']})"
+                f"  📍 价格位置: {min(max(context.vote_result.position['position_pct'], 0), 100):.1f}% "
+                f"({context.vote_result.position['location']})"
             )
 
         account_balance = self._refresh_account_state_for_audit()
         current_position =  get_current_position(self.client, self.symbol_manager.current_symbol, self.test_mode)
-        atr_pct = regime_result.get('atr_pct', None) if regime_result else None
+        atr_pct = context.regime_result.get('atr_pct', None) if context.regime_result else None
 
         global_state.add_agent_message("risk_audit", "🛡️ Guardian is auditing risk and positions...", level="info")
         from src.agents.risk_audit_agent import RiskCheckResult, RiskLevel
@@ -117,7 +99,7 @@ class RiskAuditStageRunner:
                     decision=order_params,
                     current_position=current_position,
                     account_balance=account_balance,
-                    current_price=current_price,
+                    current_price=context.current_price,
                     atr_pct=atr_pct
                 ),
                 timeout=risk_timeout
@@ -130,35 +112,29 @@ class RiskAuditStageRunner:
                 level="warning"
             )
             emit_global_runtime_event(
-                run_id=run_id,
+                context,
                 stream="error",
                 agent="risk_audit",
                 phase="timeout",
-                cycle_id=cycle_id,
-                symbol=self.symbol_manager.current_symbol,
                 data={"timeout_seconds": risk_timeout}
             )
             audit_result = fallback_audit
         except Exception as e:
             emit_global_runtime_event(
-                run_id=run_id,
+                context,
                 stream="error",
                 agent="risk_audit",
                 phase="error",
-                cycle_id=cycle_id,
-                symbol=self.symbol_manager.current_symbol,
                 data={"error": str(e)}
             )
             log.error(f"❌ risk_audit failed, blocking decision by fallback: {e}")
             audit_result = fallback_audit
 
         emit_global_runtime_event(
-            run_id=run_id,
+            context,
             stream="lifecycle",
             agent="risk_audit",
             phase="end",
-            cycle_id=cycle_id,
-            symbol=self.symbol_manager.current_symbol,
             data={
                 "passed": audit_result.passed,
                 "risk_level": audit_result.risk_level.value
@@ -185,35 +161,31 @@ class RiskAuditStageRunner:
 
     def _build_risk_order_params(
         self,
-        *,
-        vote_result: Any,
-        quant_analysis: Dict[str, Any],
-        processed_dfs: Dict[str, "pd.DataFrame"],
-        current_price: float,
-        current_position_info: Optional[Dict[str, Any]]
+        context: CycleContext
     ) -> Dict[str, Any]:
         """Build risk-audit input payload from decision + market context."""
         order_params = self._build_order_params(
-            action=vote_result.action,
-            current_price=current_price,
-            confidence=vote_result.confidence,
-            position_info=current_position_info
+            symbol=context.symbol,
+            action=context.vote_result.action,
+            current_price=context.current_price,
+            confidence=context.vote_result.confidence,
+            position_info=context.current_position_info
         )
-        order_params['symbol'] = self.symbol_manager.current_symbol
-        order_params['regime'] = vote_result.regime
-        order_params['position'] = vote_result.position
-        order_params['confidence'] = vote_result.confidence
+        order_params['symbol'] = context.symbol
+        order_params['regime'] = context.vote_result.regime
+        order_params['position'] = context.vote_result.position
+        order_params['confidence'] = context.vote_result.confidence
 
-        osc_data = quant_analysis.get('oscillator', {}) if isinstance(quant_analysis, dict) else {}
+        osc_data = context.quant_analysis.get('oscillator', {}) if isinstance(context.quant_analysis, dict) else {}
         order_params['oscillator_scores'] = {
             'osc_1h_score': osc_data.get('osc_1h_score', 0),
             'osc_15m_score': osc_data.get('osc_15m_score', 0),
             'osc_5m_score': osc_data.get('osc_5m_score', 0)
         }
-        sentiment_data = quant_analysis.get('sentiment', {}) if isinstance(quant_analysis, dict) else {}
+        sentiment_data = context.quant_analysis.get('sentiment', {}) if isinstance(context.quant_analysis, dict) else {}
         order_params['sentiment_score'] = sentiment_data.get('total_sentiment_score', 0)
-        order_params.update(self._get_symbol_trade_stats(self.symbol_manager.current_symbol))
-        trend_data = quant_analysis.get('trend', {}) if isinstance(quant_analysis, dict) else {}
+        order_params.update(self._get_symbol_trade_stats(context.symbol))
+        trend_data = context.quant_analysis.get('trend', {}) if isinstance(context.quant_analysis, dict) else {}
         order_params['trend_scores'] = {
             'trend_1h_score': trend_data.get('trend_1h_score', 0),
             'trend_15m_score': trend_data.get('trend_15m_score', 0),
@@ -223,12 +195,12 @@ class RiskAuditStageRunner:
         try:
             if self.agent_config.position_analyzer_agent:
                 from src.agents.position_analyzer_agent import PositionAnalyzer
-                df_1h = processed_dfs.get('1h')
+                df_1h = context.processed_dfs.get('1h')
                 if df_1h is not None and len(df_1h) > 5:
                     analyzer = PositionAnalyzer()
                     order_params['position_1h'] = analyzer.analyze_position(
                         df_1h,
-                        current_price,
+                        context.current_price,
                         timeframe='1h'
                     )
         except Exception:
@@ -336,7 +308,8 @@ class RiskAuditStageRunner:
             return 0.0
         
     def _build_order_params(
-        self, 
+        self,
+        symbol: str,
         action: str, 
         current_price: float,
         confidence: float,
@@ -379,7 +352,7 @@ class RiskAuditStageRunner:
             if position_info and isinstance(position_info.get('quantity'), (int, float)):
                 quantity = float(position_info.get('quantity', 0) or 0)
             elif self.test_mode:
-                pos = (global_state.virtual_positions or {}).get(self.symbol_manager.current_symbol, {})
+                pos = (global_state.virtual_positions or {}).get(symbol, {})
                 quantity = float(pos.get('quantity', 0) or 0)
         
         # 计算止损止盈

@@ -3,15 +3,13 @@ from typing import Dict, Optional, Any, Tuple
 from src.config import Config
 from src.agents.agent_config import AgentConfig
 from src.agents.ai_prediction_filter_agent import AIPredictionFilter
-from src.agents.trigger_detector_agent import TriggerDetector
-from src.agents.predict_result import PredictResult  # ✅ PredictResult Import
 from src.agents.runtime_events import emit_global_runtime_event
 from src.agents.agent_provider import AgentProvider
 
 from src.utils.logger import log
 from src.server.state import global_state
 
-from src.trading.symbol_manager import SymbolManager
+from src.trading import CycleContext
 
 from .runner_decorators import log_run
 
@@ -20,43 +18,33 @@ class FourLayerFilterStageRunner:
         self,
         config: Config,
         agent_config: AgentConfig,
-        symbol_manager: SymbolManager,
         agent_provider: AgentProvider
     ):
         self.config = config
         self.agent_config = agent_config
         self.agent_provider = agent_provider
-        self.symbol_manager = symbol_manager
 
     @log_run
     def run(
         self,
-        *,
-        run_id: str,
-        cycle_id: Optional[str],
-        quant_analysis: Dict[str, Any],
-        predict_result: PredictResult,
-        processed_dfs: Dict[str, "pd.DataFrame"],
-        current_price: float
+        context: CycleContext
     ) -> Tuple[Dict[str, Any], Dict[str, Any], str]:
         """Run four-layer strategy filtering and return regime/four-layer outputs."""
         emit_global_runtime_event(
-            run_id=run_id,
+            context,
             stream="lifecycle",
             agent="four_layer_filter",
-            phase="start",
-            cycle_id=cycle_id,
-            symbol=self.symbol_manager.current_symbol
+            phase="start"
         )
 
-        sentiment = quant_analysis.get('sentiment', {})
+        sentiment = context.quant_analysis.get('sentiment', {})
         oi_fuel = sentiment.get('oi_fuel', {})
 
         funding_rate = sentiment.get('details', {}).get('funding_rate', 0)
         if funding_rate is None:
             funding_rate = 0
 
-        df_1h = processed_dfs['1h']
+        df_1h = context.processed_dfs['1h']
         if self.agent_provider.regime_detector_agent and len(df_1h) >= 20:
             regime_result = self.agent_provider.regime_detector_agent.detect_regime(df_1h)
         else:
@@ -78,7 +66,7 @@ class FourLayerFilterStageRunner:
             'regime': regime_result.get('regime', 'unknown')
         }
 
-        df_1h = processed_dfs['1h']
+        df_1h = context.processed_dfs['1h']
         if len(df_1h) >= 20:
             close_1h = df_1h['close'].iloc[-1]
             ema20_1h = df_1h['ema_20'].iloc[-1] if 'ema_20' in df_1h.columns else close_1h
@@ -87,9 +75,9 @@ class FourLayerFilterStageRunner:
             four_layer_result['ema20_1h'] = ema20_1h
             four_layer_result['ema60_1h'] = ema60_1h
         else:
-            close_1h = current_price
-            ema20_1h = current_price
-            ema60_1h = current_price
+            close_1h = context.current_price
+            ema20_1h = context.current_price
+            ema60_1h = context.current_price
             four_layer_result['close_1h'] = close_1h
             four_layer_result['ema20_1h'] = ema20_1h
             four_layer_result['ema60_1h'] = ema60_1h
@@ -194,7 +182,7 @@ class FourLayerFilterStageRunner:
 
             if self.agent_config.ai_prediction_filter_agent and self.agent_config.predict_agent:
                 ai_filter = AIPredictionFilter()
-                ai_check = ai_filter.check_divergence(trend_1h, predict_result)
+                ai_check = ai_filter.check_divergence(trend_1h, context.predict_result)
 
                 four_layer_result['ai_check'] = ai_check
                 if adx_value < 5:
@@ -227,7 +215,7 @@ class FourLayerFilterStageRunner:
                 log.info("⏭️ Layer 2 SKIP: AIPredictionFilterAgent disabled")
 
             if four_layer_result['layer2_pass']:
-                df_15m = processed_dfs['15m']
+                df_15m = context.processed_dfs['15m']
                 if len(df_15m) < 20:
                     log.warning(f"⚠️ Insufficient 15m data: {len(df_15m)} bars")
                     four_layer_result['blocking_reason'] = 'Insufficient 15m data'
@@ -289,10 +277,8 @@ class FourLayerFilterStageRunner:
                     log.info("✅ Layer 3 PASS: 15m setup ready")
 
                     if self.agent_config.trigger_detector_agent:
-                        trigger_detector = TriggerDetector()
-
-                        df_5m = processed_dfs['5m']
-                        trigger_result = trigger_detector.detect_trigger(df_5m, direction=trend_1h)
+                        df_5m = context.processed_dfs['5m']
+                        trigger_result = self.agent_provider.trigger_detector_agent.detect_trigger(df_5m, direction=trend_1h)
                         four_layer_result['trigger_pattern'] = trigger_result.get('pattern_type') or 'None'
                         rvol = trigger_result.get('rvol', 1.0)
                         four_layer_result['trigger_rvol'] = rvol
@@ -343,12 +329,10 @@ class FourLayerFilterStageRunner:
 
         global_state.four_layer_result = four_layer_result
         emit_global_runtime_event(
-            run_id=run_id,
+            context,
             stream="lifecycle",
             agent="four_layer_filter",
             phase="end",
-            cycle_id=cycle_id,
-            symbol=self.symbol_manager.current_symbol,
             data={
                 "final_action": four_layer_result.get('final_action', 'wait'),
                 "layer4_pass": bool(four_layer_result.get('layer4_pass'))

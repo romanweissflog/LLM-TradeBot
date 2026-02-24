@@ -1,5 +1,5 @@
 import asyncio
-from typing import Dict, Optional, Any
+from typing import Dict, Any
 
 from src.agents.agent_config import AgentConfig
 from src.agents.agent_provider import AgentProvider
@@ -9,7 +9,7 @@ from src.agents.runtime_events import emit_global_runtime_event
 from src.utils.task_util import run_task_with_timeout
 from src.utils.agents_util import get_agent_timeout
 
-from src.trading.symbol_manager import SymbolManager
+from src.trading import CycleContext
 from src.utils.logger import log
 from src.server.state import global_state
 
@@ -20,24 +20,16 @@ class SemanticAnalysisRunner:
         self,
         config: Config,
         agent_config: AgentConfig,
-        symbol_manager: SymbolManager,
         agent_provider: AgentProvider,
     ):
         self.config = config
         self.agent_config = agent_config
-        self.symbol_manager = symbol_manager
         self.agent_provider = agent_provider
       
     @log_run
     async def run(
         self,
-        *,
-        run_id: str,
-        cycle_id: Optional[str],
-        current_price: float,
-        trend_1h: str,
-        four_layer_result: Dict[str, Any],
-        processed_dfs: Dict[str, "pd.DataFrame"]
+        context: CycleContext
     ) -> Dict[str, Any]:
         """
         Run optional trend/setup/trigger semantic agents and summarize their outputs.
@@ -64,42 +56,40 @@ class SemanticAnalysisRunner:
             return {}
 
         emit_global_runtime_event(
-            run_id=run_id,
+            context,
             stream="lifecycle",
             agent="semantic_agents",
-            phase="start",
-            symbol=self.symbol_manager.current_symbol,
-            cycle_id=cycle_id
+            phase="start"
         )
 
         try:
             trend_data = {
-                'symbol': self.symbol_manager.current_symbol,
-                'close_1h': four_layer_result.get('close_1h', current_price),
-                'ema20_1h': four_layer_result.get('ema20_1h', current_price),
-                'ema60_1h': four_layer_result.get('ema60_1h', current_price),
-                'oi_change': four_layer_result.get('oi_change', 0),
-                'adx': four_layer_result.get('adx', 20),
-                'regime': four_layer_result.get('regime', 'unknown')
+                'symbol': context.symbol,
+                'close_1h': context.four_layer_result.get('close_1h', context.current_price),
+                'ema20_1h': context.four_layer_result.get('ema20_1h', context.current_price),
+                'ema60_1h': context.four_layer_result.get('ema60_1h', context.current_price),
+                'oi_change': context.four_layer_result.get('oi_change', 0),
+                'adx': context.four_layer_result.get('adx', 20),
+                'regime': context.four_layer_result.get('regime', 'unknown')
             }
 
             setup_data = {
-                'symbol': self.symbol_manager.current_symbol,
-                'close_15m': processed_dfs['15m']['close'].iloc[-1] if len(processed_dfs['15m']) > 0 else current_price,
-                'kdj_j': four_layer_result.get('kdj_j', 50),
-                'kdj_k': processed_dfs['15m']['kdj_k'].iloc[-1] if 'kdj_k' in processed_dfs['15m'].columns else 50,
-                'bb_upper': processed_dfs['15m']['bb_upper'].iloc[-1] if 'bb_upper' in processed_dfs['15m'].columns else current_price * 1.02,
-                'bb_middle': processed_dfs['15m']['bb_middle'].iloc[-1] if 'bb_middle' in processed_dfs['15m'].columns else current_price,
-                'bb_lower': processed_dfs['15m']['bb_lower'].iloc[-1] if 'bb_lower' in processed_dfs['15m'].columns else current_price * 0.98,
-                'trend_direction': trend_1h,
-                'macd_diff': processed_dfs['15m']['macd_diff'].iloc[-1] if 'macd_diff' in processed_dfs['15m'].columns else 0
+                'symbol': context.symbol,
+                'close_15m': context.processed_dfs['15m']['close'].iloc[-1] if len(context.processed_dfs['15m']) > 0 else context.current_price,
+                'kdj_j': context.four_layer_result.get('kdj_j', 50),
+                'kdj_k': context.processed_dfs['15m']['kdj_k'].iloc[-1] if 'kdj_k' in context.processed_dfs['15m'].columns else 50,
+                'bb_upper': context.processed_dfs['15m']['bb_upper'].iloc[-1] if 'bb_upper' in context.processed_dfs['15m'].columns else context.current_price * 1.02,
+                'bb_middle': context.processed_dfs['15m']['bb_middle'].iloc[-1] if 'bb_middle' in context.processed_dfs['15m'].columns else context.current_price,
+                'bb_lower': context.processed_dfs['15m']['bb_lower'].iloc[-1] if 'bb_lower' in context.processed_dfs['15m'].columns else context.current_price * 0.98,
+                'trend_direction': context.trend_1h,
+                'macd_diff': context.processed_dfs['15m']['macd_diff'].iloc[-1] if 'macd_diff' in context.processed_dfs['15m'].columns else 0
             }
 
             trigger_data = {
-                'symbol': self.symbol_manager.current_symbol,
-                'pattern': four_layer_result.get('trigger_pattern'),
-                'rvol': four_layer_result.get('trigger_rvol', 1.0),
-                'trend_direction': four_layer_result.get('final_action', 'neutral')
+                'symbol': context.symbol,
+                'pattern': context.four_layer_result.get('trigger_pattern'),
+                'rvol': context.four_layer_result.get('trigger_rvol', 1.0),
+                'trend_direction': context.four_layer_result.get('final_action', 'neutral')
             }
 
             tasks = {}
@@ -118,12 +108,10 @@ class SemanticAnalysisRunner:
                 semantic_timeout = get_agent_timeout(self.config, self.agent_config, 'semantic_agent', 35.0)
                 wrapped_tasks = {
                     key: run_task_with_timeout(
-                        run_id=run_id,
-                        cycle_id=cycle_id,
+                        context,
                         agent_name=f"{key}_agent",
                         timeout_seconds=semantic_timeout,
                         task_factory=(lambda fut=fut: fut),
-                        symbol=self.symbol_manager.current_symbol,
                         fallback=None
                     )
                     for key, fut in tasks.items()
@@ -175,12 +163,10 @@ class SemanticAnalysisRunner:
                     global_state.add_agent_message("trigger_agent", summary, level="info")
 
             emit_global_runtime_event(
-                run_id=run_id,
+                context,
                 stream="lifecycle",
                 agent="semantic_agents",
                 phase="end",
-                cycle_id=cycle_id,
-                symbol=self.symbol_manager.current_symbol,
                 data={"count": len(analyses)}
             )
             return analyses
@@ -194,12 +180,10 @@ class SemanticAnalysisRunner:
             }
             global_state.semantic_analyses = fallback
             emit_global_runtime_event(
-                run_id=run_id,
+                context,
                 stream="error",
                 agent="semantic_agents",
                 phase="error",
-                cycle_id=cycle_id,
-                symbol=self.symbol_manager.current_symbol,
                 data={"error": str(e)}
             )
             return fallback

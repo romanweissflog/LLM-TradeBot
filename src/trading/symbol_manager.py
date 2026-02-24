@@ -12,7 +12,6 @@ from src.agents.agent_config import AgentConfig
 from src.utils.logger import log
 from src.server.state import global_state
 
-
 if TYPE_CHECKING:
     from src.agents.agent_provider import AgentProvider
 

@@ -8,12 +8,14 @@ from src.agents.agent_config import AgentConfig
 from src.agents.agent_provider import AgentProvider
 from src.data.processor import MarketDataProcessor  # ✅ Corrected Import
 
+from src.agents.data_sync import MarketSnapshot
+
 from src.api.binance_client import BinanceClient
 from src.utils.data_saver import DataSaver
 
 from src.trading.stage_result import StageResult
-from src.trading.symbol_manager import SymbolManager
 from src.trading.result_builder import ResultBuilder
+from src.trading import CycleContext
 
 from src.agents.runtime_events import emit_global_runtime_event
 from src.utils.agents_util import get_agent_timeout
@@ -29,7 +31,6 @@ class OracleStageRunner:
         config: Config,
         agent_config: AgentConfig,
         client: BinanceClient,
-        symbol_manager: SymbolManager,
         agent_provider: AgentProvider,
         saver: DataSaver,
         kline_limit: int,
@@ -38,11 +39,9 @@ class OracleStageRunner:
         self.config = config
         self.agent_config = agent_config
         self.client = client
-        self.symbol_manager = symbol_manager
         self.agent_provider = agent_provider
         self.saver = saver
         self.result_builder = ResultBuilder(
-            symbol_manager,
             saver
         )
         self.kline_limit = kline_limit
@@ -55,28 +54,23 @@ class OracleStageRunner:
     @log_run
     async def run(
         self,
-        *,
-        run_id: str,
-        cycle_id: Optional[str],
-        snapshot_id: str
+        context: CycleContext
     ) -> StageResult:
         """Run Step 1: fetch market data, validate, build position context, and process indicators."""
         global_state.oracle_status = "Fetching Data..."
-        global_state.add_agent_message("system", f"Fetching market data for {self.symbol_manager.current_symbol}...", level="info")
+        global_state.add_agent_message("system", f"Fetching market data for {context.symbol}...", level="info")
         emit_global_runtime_event(
-            run_id=run_id,
+            context,
             stream="lifecycle",
             agent="oracle",
-            phase="start",
-            cycle_id=cycle_id,
-            symbol=self.symbol_manager.current_symbol
+            phase="start"
         )
 
         data_sync_timeout = get_agent_timeout(self.config, self.agent_config, 'data_sync', 200.0)
         try:
             market_snapshot = await asyncio.wait_for(
                 self.agent_provider.data_sync_agent.fetch_all_timeframes(
-                    self.symbol_manager.current_symbol,
+                    context.symbol,
                     limit=self.kline_limit
                 ),
                 timeout=data_sync_timeout
@@ -87,12 +81,10 @@ class OracleStageRunner:
             global_state.add_log(f"[🚨 CRITICAL] {error_msg}")
             global_state.oracle_status = "DATA ERROR"
             emit_global_runtime_event(
-                run_id=run_id,
+                context,
                 stream="error",
                 agent="oracle",
                 phase="timeout",
-                cycle_id=cycle_id,
-                symbol=self.symbol_manager.current_symbol,
                 data={"error_type": "api_timeout", "timeout_seconds": data_sync_timeout}
             )
             return StageResult(early_result={
@@ -109,12 +101,10 @@ class OracleStageRunner:
             global_state.add_log(f"[🚨 CRITICAL] {error_msg}")
             global_state.oracle_status = "DATA ERROR"
             emit_global_runtime_event(
-                run_id=run_id,
+                context,
                 stream="error",
                 agent="oracle",
                 phase="error",
-                cycle_id=cycle_id,
-                symbol=self.symbol_manager.current_symbol,
                 data={"error_type": "api_failure", "error": str(e)}
             )
             return StageResult(early_result={
@@ -139,12 +129,10 @@ class OracleStageRunner:
                 print(f"   ❌ {err}")
             print(f"{'='*60}\n")
             emit_global_runtime_event(
-                run_id=run_id,
+                context,
                 stream="error",
                 agent="oracle",
                 phase="error",
-                cycle_id=cycle_id,
-                symbol=self.symbol_manager.current_symbol,
                 data={"error_type": "data_incomplete", "errors": data_errors}
             )
             return StageResult(early_result={
@@ -158,12 +146,8 @@ class OracleStageRunner:
             })
 
         global_state.oracle_status = "Data Ready"
-        current_position_info = self._extract_position_info(market_snapshot)
-        processed_dfs = self._process_market_snapshot(
-            market_snapshot=market_snapshot,
-            snapshot_id=snapshot_id,
-            cycle_id=cycle_id
-        )
+        current_position_info = self._extract_position_info(context.symbol, market_snapshot)
+        processed_dfs = self._process_market_snapshot(context, market_snapshot=market_snapshot)
 
         market_snapshot.stable_5m = processed_dfs['5m']
         market_snapshot.stable_15m = processed_dfs['15m']
@@ -172,41 +156,36 @@ class OracleStageRunner:
         current_price = market_snapshot.live_5m.get('close')
         print(f"  ✅ Data ready: ${current_price:,.2f} ({market_snapshot.timestamp.strftime('%H:%M:%S')})")
         global_state.add_log(f"[🕵️ ORACLE] Data ready: ${current_price:,.2f}")
-        global_state.current_price[self.symbol_manager.current_symbol] = current_price
+        global_state.current_price[context.symbol] = current_price
 
         data_readiness = self._assess_data_readiness(processed_dfs)
         if not data_readiness['is_ready']:
             emit_global_runtime_event(
-                run_id=run_id,
+                context,
                 stream="lifecycle",
                 agent="oracle",
                 phase="end",
-                cycle_id=cycle_id,
-                symbol=self.symbol_manager.current_symbol,
                 data={"status": "warmup"}
             )
             return StageResult(
                 early_result=self.result_builder.build_warmup_wait_result(
-                data_readiness=data_readiness,
-                snapshot_id=snapshot_id,
-                cycle_id=cycle_id
-            ))
+                    context,
+                    data_readiness=data_readiness)
+                )
 
         indicator_snapshot = self._capture_indicator_snapshot(processed_dfs, timeframe='15m')
         if indicator_snapshot:
             snapshots = getattr(global_state, 'indicator_snapshot', {})
             if not isinstance(snapshots, dict) or 'ema_status' in snapshots:
                 snapshots = {}
-            snapshots[self.symbol_manager.current_symbol] = indicator_snapshot
+            snapshots[context.symbol] = indicator_snapshot
             global_state.indicator_snapshot = snapshots
 
         emit_global_runtime_event(
-            run_id=run_id,
+            context,
             stream="lifecycle",
             agent="oracle",
             phase="end",
-            cycle_id=cycle_id,
-            symbol=self.symbol_manager.current_symbol,
             data={"status": "ok", "price": current_price}
         )
         return StageResult(payload={
@@ -216,7 +195,7 @@ class OracleStageRunner:
             'current_position_info': current_position_info
         })
     
-    def _validate_market_snapshot(self, market_snapshot: Any) -> List[str]:
+    def _validate_market_snapshot(self, market_snapshot: MarketSnapshot) -> List[str]:
         """Validate mandatory market snapshot fields before analysis."""
         data_errors: List[str] = []
 
@@ -241,13 +220,13 @@ class OracleStageRunner:
         return data_errors
     
     
-    def _extract_position_info(self, market_snapshot: Any) -> Optional[Dict[str, Any]]:
+    def _extract_position_info(self, symbol: str, market_snapshot: MarketSnapshot) -> Optional[Dict[str, Any]]:
         """Build unified position context for decision and risk stages."""
         current_position_info = None
         try:
             if self.test_mode:
-                if self.symbol_manager.current_symbol in global_state.virtual_positions:
-                    v_pos = global_state.virtual_positions[self.symbol_manager.current_symbol]
+                if symbol in global_state.virtual_positions:
+                    v_pos = global_state.virtual_positions[symbol]
                     current_price_5m = market_snapshot.live_5m['close']
                     entry_price = v_pos['entry_price']
                     qty = v_pos['quantity']
@@ -263,7 +242,7 @@ class OracleStageRunner:
                     pnl_pct = (unrealized_pnl / margin) * 100 if margin > 0 else 0
 
                     current_position_info = {
-                        'symbol': self.symbol_manager.current_symbol,
+                        'symbol': symbol,
                         'side': side,
                         'quantity': qty,
                         'entry_price': entry_price,
@@ -276,10 +255,10 @@ class OracleStageRunner:
                     v_pos['unrealized_pnl'] = unrealized_pnl
                     v_pos['pnl_pct'] = pnl_pct
                     v_pos['current_price'] = current_price_5m
-                    log.info(f"💰 [Virtual Position] {side} {self.symbol_manager.current_symbol} PnL: ${unrealized_pnl:.2f} (ROE: {pnl_pct:+.2f}%)")
+                    log.info(f"💰 [Virtual Position] {side} {symbol} PnL: ${unrealized_pnl:.2f} (ROE: {pnl_pct:+.2f}%)")
             else:
                 try:
-                    raw_pos = self.client.get_futures_position(self.symbol_manager.current_symbol)
+                    raw_pos = self.client.get_futures_position(symbol)
                     if raw_pos and float(raw_pos.get('positionAmt', 0)) != 0:
                         amt = float(raw_pos.get('positionAmt', 0))
                         side = 'LONG' if amt > 0 else 'SHORT'
@@ -292,7 +271,7 @@ class OracleStageRunner:
                         pnl_pct = (unrealized_pnl / margin) * 100 if margin > 0 else 0
 
                         current_position_info = {
-                            'symbol': self.symbol_manager.current_symbol,
+                            'symbol': symbol,
                             'side': side,
                             'quantity': qty,
                             'entry_price': entry_price,
@@ -301,7 +280,7 @@ class OracleStageRunner:
                             'leverage': leverage,
                             'is_test': False
                         }
-                        log.info(f"💰 [Real Position] {side} {self.symbol_manager.current_symbol} Amt:{amt} PnL:${unrealized_pnl:.2f} (ROE: {pnl_pct:+.2f}%)")
+                        log.info(f"💰 [Real Position] {side} {symbol} Amt:{amt} PnL:${unrealized_pnl:.2f} (ROE: {pnl_pct:+.2f}%)")
                 except Exception as e:
                     log.error(f"Failed to fetch real position: {e}")
         except Exception as e:
@@ -309,7 +288,6 @@ class OracleStageRunner:
 
         return current_position_info
 
-    
     def _capture_indicator_snapshot(self, processed_dfs: Dict[str, "pd.DataFrame"], timeframe: str = '15m') -> Optional[Dict]:
         """Capture lightweight indicator snapshot for UI."""
         df = processed_dfs.get(timeframe)
@@ -365,31 +343,29 @@ class OracleStageRunner:
             'macd_diff': macd_diff,
             'bb_position': bb_position
         }
-
-    
+  
     def _process_market_snapshot(
         self,
+        context: CycleContext,
         *,
-        market_snapshot: Any,
-        snapshot_id: str,
-        cycle_id: Optional[str]
+        market_snapshot: MarketSnapshot
     ) -> Dict[str, "pd.DataFrame"]:
         """Save raw/indicators/features and return processed dataframes."""
         processed_dfs: Dict[str, "pd.DataFrame"] = {}
         for tf in ['5m', '15m', '1h']:
             raw_klines = getattr(market_snapshot, f'raw_{tf}')
-            self.saver.save_market_data(raw_klines, self.symbol_manager.current_symbol, tf, cycle_id=cycle_id)
+            self.saver.save_market_data(raw_klines, context.symbol, tf, cycle_id=context.cycle_id)
 
             stable_klines = self._get_closed_klines(raw_klines)
             df_with_indicators = self.processor.process_klines(
                 stable_klines,
-                self.symbol_manager.current_symbol,
+                context.symbol,
                 tf,
                 save_raw=False
             )
-            self.saver.save_indicators(df_with_indicators, self.symbol_manager.current_symbol, tf, snapshot_id, cycle_id=cycle_id)
+            self.saver.save_indicators(df_with_indicators, context.symbol, tf, context.snapshot_id, cycle_id=context.cycle_id)
             features_df = self.processor.extract_feature_snapshot(df_with_indicators)
-            self.saver.save_features(features_df, self.symbol_manager.current_symbol, tf, snapshot_id, cycle_id=cycle_id)
+            self.saver.save_features(features_df, context.symbol, tf, context.snapshot_id, cycle_id=context.cycle_id)
             processed_dfs[tf] = df_with_indicators
         return processed_dfs
 

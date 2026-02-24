@@ -4,8 +4,9 @@ from src.utils.data_saver import DataSaver
 
 from src.agents.runtime_events import emit_global_runtime_event
 
-from src.trading.symbol_manager import SymbolManager
-from src.agents.predict_result import PredictResult  # ✅ PredictResult Import
+from src.trading import CycleContext
+from src.agents.predict import PredictResult  # ✅ PredictResult Import
+from src.agents.reflection import ReflectionResult
 from src.utils.logger import log
 from src.server.state import global_state
 
@@ -17,46 +18,31 @@ if TYPE_CHECKING:
 class AgentAnalysisStageRunner:
     def __init__(
         self,
-        symbol_manager: SymbolManager,
         runner_provider: "RunnerProvider",
         saver: DataSaver
     ):
-        self.symbol_manager = symbol_manager
         self.saver = saver
         self.runner_provider = runner_provider
 
     @log_run
     async def run(
         self,
-        *,
-        run_id: str,
-        cycle_id: Optional[str],
-        snapshot_id: str,
-        market_snapshot: Any,
-        processed_dfs: Dict[str, "pd.DataFrame"]
-    ) -> Tuple[Dict[str, Any], PredictResult, Any, Optional[str]]:
+        context: CycleContext
+    ) -> Tuple[Dict[str, Any], PredictResult, ReflectionResult, Optional[str]]:
         """Run Step 2 parallel analysts and persist analysis context."""
         emit_global_runtime_event(
-            run_id=run_id,
+            context,
             stream="lifecycle",
             agent="analysis_stage",
-            phase="start",
-            cycle_id=cycle_id,
-            symbol=self.symbol_manager.current_symbol
+            phase="start"
         )
         try:
-            global_state.add_log(f"[📊 SYSTEM] Parallel analysis started for {self.symbol_manager.current_symbol}")
+            global_state.add_log(f"[📊 SYSTEM] Parallel analysis started for {context.symbol}")
 
-            quant_analysis, predict_result, reflection_result, reflection_text = await self.runner_provider.parallel_analysis_runner.run(
-                run_id=run_id,
-                cycle_id=cycle_id,
-                snapshot_id=snapshot_id,
-                market_snapshot=market_snapshot,
-                processed_dfs=processed_dfs
-            )
+            quant_analysis, predict_result, reflection_result, reflection_text = await self.runner_provider.parallel_analysis_runner.run(context)
 
             try:
-                df_15m = processed_dfs['15m']
+                df_15m = context.processed_dfs['15m']
                 if 'macd_diff' in df_15m.columns:
                     macd_val = float(df_15m['macd_diff'].iloc[-1])
                     if 'trend' not in quant_analysis:
@@ -67,7 +53,7 @@ class AgentAnalysisStageRunner:
             except Exception as e:
                 log.warning(f"Failed to inject MACD data: {e}")
 
-            self.saver.save_context(quant_analysis, self.symbol_manager.current_symbol, 'analytics', snapshot_id, cycle_id=cycle_id)
+            self.saver.save_context(quant_analysis, context.symbol, 'analytics', context.snapshot_id, cycle_id=context.cycle_id)
 
             trend_score = quant_analysis.get('trend', {}).get('total_trend_score', 0)
             osc_score = quant_analysis.get('oscillator', {}).get('total_osc_score', 0)
@@ -75,22 +61,18 @@ class AgentAnalysisStageRunner:
             global_state.add_log(f"[👨‍🔬 STRATEGIST] Trend={trend_score:+.0f} | Osc={osc_score:+.0f} | Sent={sent_score:+.0f}")
 
             emit_global_runtime_event(
-                run_id=run_id,
+                context,
                 stream="lifecycle",
                 agent="analysis_stage",
-                phase="end",
-                cycle_id=cycle_id,
-                symbol=self.symbol_manager.current_symbol
+                phase="end"
             )
             return quant_analysis, predict_result, reflection_result, reflection_text
         except Exception as e:
             emit_global_runtime_event(
-                run_id=run_id,
+                context,
                 stream="error",
                 agent="analysis_stage",
                 phase="error",
-                cycle_id=cycle_id,
-                symbol=self.symbol_manager.current_symbol,
                 data={"error": str(e)}
             )
             raise

@@ -16,7 +16,7 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
-from src.agents.predict_agent import PredictAgent
+from src.agents.predict import PredictAgent
 from src.utils.logger import log
 
 # 尝试导入 LightGBM

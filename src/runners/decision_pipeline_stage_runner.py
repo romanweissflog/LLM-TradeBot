@@ -5,7 +5,7 @@ from datetime import datetime
 from dataclasses import asdict
 
 from src.trading.stage_result import StageResult
-from src.trading.symbol_manager import SymbolManager
+from src.trading import CycleContext
 from src.trading.result_builder import ResultBuilder
 from src.utils.data_saver import DataSaver
 from src.server.state import global_state
@@ -21,16 +21,13 @@ from .runner_decorators import log_run
 class DecisionPipelineStageRunner:
     def __init__(
         self,
-        symbol_manager: SymbolManager,
         runner_provider: "RunnerProvider",
         saver: DataSaver,
         test_mode: bool = False
     ):
-        self.symbol_manager = symbol_manager
         self.runner_provider = runner_provider
         self.saver = saver
         self.result_builder = ResultBuilder(
-            symbol_manager,
             saver
         )
         self.test_mode = test_mode
@@ -38,44 +35,26 @@ class DecisionPipelineStageRunner:
     @log_run
     async def run(
         self,
-        *,
-        run_id: str,
-        cycle_id: Optional[str],
-        snapshot_id: str,
-        processed_dfs: Dict[str, "pd.DataFrame"],
-        quant_analysis: Dict[str, Any],
-        predict_result: Any,
-        reflection_text: Optional[str],
-        current_price: float,
-        current_position_info: Optional[Dict[str, Any]],
-        regime_result: Optional[Dict[str, Any]]
+        context: CycleContext
     ) -> StageResult:
         """Run decision stage + observability + passive handling."""
-        decision_payload, decision_source, fast_signal, vote_result, selected_agent_outputs = await self.runner_provider.decision_stage_runner.run(
-            run_id=run_id,
-            cycle_id=cycle_id,
-            processed_dfs=processed_dfs,
-            quant_analysis=quant_analysis,
-            predict_result=predict_result,
-            reflection_text=reflection_text,
-            current_price=current_price,
-            current_position_info=current_position_info,
-            regime_result=regime_result
-        )
+        decision_payload, decision_source, fast_signal, vote_result, selected_agent_outputs = await self.runner_provider.decision_stage_runner.run(context)
 
         self._record_decision_observability(
+            symbol=context.symbol,
             decision_payload=decision_payload,
             decision_source=decision_source,
             vote_result=vote_result,
-            snapshot_id=snapshot_id,
-            cycle_id=cycle_id
+            snapshot_id=context.snapshot_id,
+            cycle_id=context.cycle_id
         )
 
         passive_result = self._handle_passive_decision(
+            symbol=context.symbol,
             vote_result=vote_result,
-            quant_analysis=quant_analysis,
-            predict_result=predict_result,
-            current_position_info=current_position_info
+            quant_analysis=context.quant_analysis,
+            predict_result=context.predict_result,
+            current_position_info=context.current_position_info
         )
         if passive_result is not None:
             return StageResult(early_result=passive_result)
@@ -91,6 +70,7 @@ class DecisionPipelineStageRunner:
     def _record_decision_observability(
         self,
         *,
+        symbol: str,
         decision_payload: Dict[str, Any],
         decision_source: str,
         vote_result: Any,
@@ -102,7 +82,7 @@ class DecisionPipelineStageRunner:
             full_log_content = f"""
 ================================================================================
 🕐 Timestamp: {datetime.now().isoformat()}
-💱 Symbol: {self.symbol_manager.current_symbol}
+💱 Symbol: {symbol}
 🔄 Cycle: #{cycle_id}
 ================================================================================
 
@@ -127,7 +107,7 @@ class DecisionPipelineStageRunner:
 """
             self.saver.save_llm_log(
                 content=full_log_content,
-                symbol=self.symbol_manager.current_symbol,
+                symbol=symbol,
                 snapshot_id=snapshot_id,
                 cycle_id=cycle_id
             )
@@ -142,11 +122,12 @@ class DecisionPipelineStageRunner:
         decision_label = "FAST Decision" if decision_source == 'fast_trend' else ("RULE Decision" if decision_source == 'decision_core' else "Final Decision")
         global_state.add_log(f"[⚖️ {decision_label}] Action={vote_result.action.upper()} | Conf={decision_payload.get('confidence', 0)}%")
 
-        self.saver.save_decision(asdict(vote_result), self.symbol_manager.current_symbol, snapshot_id, cycle_id=cycle_id)
+        self.saver.save_decision(asdict(vote_result), symbol, snapshot_id, cycle_id=cycle_id)
 
     def _handle_passive_decision(
         self,
         *,
+        symbol: str,
         vote_result: Any,
         quant_analysis: Dict[str, Any],
         predict_result: Any,
@@ -164,7 +145,7 @@ class DecisionPipelineStageRunner:
             except (TypeError, ValueError):
                 has_position = True
         if not has_position and self.test_mode:
-            has_position = self.symbol_manager.current_symbol in global_state.virtual_positions
+            has_position = symbol in global_state.virtual_positions
         actual_action = 'hold' if has_position else 'wait'
 
         action_display = '持仓观望' if actual_action == 'hold' else '观望'
@@ -175,6 +156,7 @@ class DecisionPipelineStageRunner:
         global_state.add_log(f"⚖️ DecisionCoreAgent (The Critic): Context(Regime={regime_txt}, Pos={pos_txt}) => Vote: {actual_action.upper()} ({vote_result.reason})")
 
         decision_dict = self.result_builder.build_decision_snapshot(
+            symbol=symbol,
             vote_result=vote_result,
             quant_analysis=quant_analysis,
             predict_result=predict_result,

@@ -9,21 +9,19 @@ from src.utils.semantic_converter import SemanticConverter  # ✅ Global Import
 
 from src.utils.logger import log
 from src.server.state import global_state
-
-from .symbol_manager import SymbolManager
+from src.trading import CycleContext
 
 class ResultBuilder:
     def __init__(
         self,
-        symbol_manager: SymbolManager,
         saver: DataSaver
     ):
-        self.symbol_manager = symbol_manager
         self.saver = saver
 
     def build_decision_snapshot(
         self,
         *,
+        symbol: str,
         vote_result: VoteResult,
         quant_analysis: Dict[str, Any],
         predict_result: PredictResult,
@@ -36,7 +34,7 @@ class ResultBuilder:
         decision_dict = asdict(vote_result)
         if action_override:
             decision_dict['action'] = action_override
-        decision_dict['symbol'] = self.symbol_manager.current_symbol
+        decision_dict['symbol'] = symbol
         decision_dict['timestamp'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         decision_dict['cycle_number'] = global_state.cycle_counter
         decision_dict['cycle_id'] = global_state.current_cycle_id
@@ -78,14 +76,13 @@ class ResultBuilder:
 
     def build_warmup_wait_result(
         self,
+        context: CycleContext,
         *,
         data_readiness: Dict[str, Any],
-        snapshot_id: str,
-        cycle_id: Optional[str]
     ) -> Dict[str, Any]:
         """Create wait result when indicators are still warming up."""
         reason = data_readiness.get('blocking_reason') or "data_warmup"
-        log.warning(f"[{self.symbol_manager.current_symbol}] {reason}")
+        log.warning(f"[{context.symbol}] {reason}")
         global_state.add_log(f"[DATA] {reason}")
         global_state.oracle_status = "Warmup"
         global_state.guardian_status = "Warmup"
@@ -107,7 +104,7 @@ class ResultBuilder:
             'vote_details': {
                 'data_validity': data_readiness['details']
             },
-            'symbol': self.symbol_manager.current_symbol,
+            'symbol': context.symbol,
             'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             'cycle_number': global_state.cycle_counter,
             'cycle_id': global_state.current_cycle_id,
@@ -119,7 +116,7 @@ class ResultBuilder:
         self._attach_agent_ui_fields(decision_dict)
 
         global_state.update_decision(decision_dict)
-        self.saver.save_decision(decision_dict, self.symbol_manager.current_symbol, snapshot_id, cycle_id=cycle_id)
+        self.saver.save_decision(decision_dict, context.symbol, context.snapshot_id, cycle_id=context.cycle_id)
 
         return {
             'status': 'wait',

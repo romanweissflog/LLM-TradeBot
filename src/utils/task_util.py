@@ -5,30 +5,27 @@ from typing import Optional
 
 from src.utils.logger import log
 from src.server.state import global_state
+from src.trading import CycleContext
 
 from src.agents.runtime_events import emit_global_runtime_event
 
 async def run_task_with_timeout(
+    context: CycleContext,
     *,
-    run_id: str,
-    cycle_id: Optional[str],
     agent_name: str,
     timeout_seconds: float,
     task_factory,
     fallback=None,
-    symbol: str,
     log_errors: bool = True
 ):
     """
     Execute one async task with timeout and standardized runtime events.
     """
     emit_global_runtime_event(
-        run_id=run_id,
+        context,
         stream="lifecycle",
         agent=agent_name,
         phase="start",
-        symbol=symbol,
-        cycle_id=cycle_id,
         data={"timeout_seconds": timeout_seconds}
     )
     started = time.time()
@@ -36,12 +33,10 @@ async def run_task_with_timeout(
         result = await asyncio.wait_for(task_factory(), timeout=timeout_seconds)
         duration_ms = int((time.time() - started) * 1000)
         emit_global_runtime_event(
-            run_id=run_id,
+            context,
             stream="lifecycle",
             agent=agent_name,
             phase="end",
-            cycle_id=cycle_id,
-            symbol=symbol,
             data={"status": "ok", "duration_ms": duration_ms}
         )
         return result
@@ -52,12 +47,10 @@ async def run_task_with_timeout(
             log.warning(msg)
         global_state.add_agent_message(agent_name, msg, level="warning")
         emit_global_runtime_event(
-            run_id=run_id,
+            context,
             stream="error",
             agent=agent_name,
             phase="timeout",
-            cycle_id=cycle_id,
-        symbol=symbol,
             data={"status": "timeout", "duration_ms": duration_ms, "timeout_seconds": timeout_seconds}
         )
         return fallback
@@ -66,12 +59,10 @@ async def run_task_with_timeout(
         if log_errors:
             log.error(f"❌ {agent_name} failed: {e}")
         emit_global_runtime_event(
-            run_id=run_id,
+            context,
             stream="error",
             agent=agent_name,
             phase="error",
-            cycle_id=cycle_id,
-            symbol=symbol,
             data={"status": "error", "duration_ms": duration_ms, "error": str(e)}
         )
         return fallback

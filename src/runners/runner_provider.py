@@ -6,8 +6,6 @@ from src.api.binance_client import BinanceClient
 from src.utils.data_saver import DataSaver
 from src.agents.agent_provider import AgentProvider
 
-from src.trading.symbol_manager import SymbolManager
-
 from .action_pipeline_stage_runner import ActionPipelineStageRunner
 from .agent_analysis_stage_runner import AgentAnalysisStageRunner
 from .cycle_pipeline_runner import CyclePipelineRunner
@@ -27,7 +25,6 @@ class RunnerProvider:
         config: Config,
         agent_config: AgentConfig,
         client: BinanceClient,
-        symbol_manager: SymbolManager,
         agent_provider: AgentProvider,
         strategy_engine: StrategyEngine,
         saver: DataSaver,
@@ -39,24 +36,20 @@ class RunnerProvider:
         test_mode: bool = False
     ):
         self.action_pipeline_stage_runner = ActionPipelineStageRunner(
-            symbol_manager,
             self,
             saver
         )
 
         self.agent_analysis_stage_runner = AgentAnalysisStageRunner(
-            symbol_manager,
             self,
             saver
         )
 
         self.cycle_pipeline_runner = CyclePipelineRunner(
-            symbol_manager,
             self
         )
 
         self.decision_pipeline_stage_runner = DecisionPipelineStageRunner(
-            symbol_manager,
             self,
             saver,
             test_mode
@@ -65,13 +58,11 @@ class RunnerProvider:
         self.decision_stage_runner = DecisionStageRunner(
             config,
             agent_config,
-            symbol_manager,
             strategy_engine,
             max_position_size
         )
 
         self.execution_stage_runner = ExecutionStageRunner(
-            symbol_manager,
             saver,
             test_mode
         )
@@ -79,7 +70,6 @@ class RunnerProvider:
         self.four_layer_filter_stage_runner = FourLayerFilterStageRunner(
             config,
             agent_config,
-            symbol_manager,
             agent_provider
         )
 
@@ -87,7 +77,6 @@ class RunnerProvider:
             config,
             agent_config,
             client,
-            symbol_manager,
             agent_provider,
             saver,
             kline_limit,
@@ -97,13 +86,11 @@ class RunnerProvider:
         self.parallel_analysis_runner = ParallelAnalysisRunner(
             config,
             agent_config,
-            symbol_manager,
             agent_provider,
             saver
         )
 
         self.post_filter_stage_runner = PostFilterStageRunner(
-            symbol_manager,
             agent_provider,
             self
         )
@@ -112,7 +99,6 @@ class RunnerProvider:
             config,
             agent_config,
             client,
-            symbol_manager,
             agent_provider,
             leverage,
             stop_loss_pct,
@@ -123,7 +109,6 @@ class RunnerProvider:
         self.semantic_analysis_runner = SemanticAnalysisRunner(
             config,
             agent_config,
-            symbol_manager,
             agent_provider
         )
 

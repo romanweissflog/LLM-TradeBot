@@ -7,7 +7,7 @@ from dataclasses import asdict
 from src.config import Config
 from src.strategy.llm_engine import StrategyEngine
 from src.agents.agent_config import AgentConfig
-from src.agents.decision_core_agent import VoteResult
+from src.agents.decision_core.decision_core_agent import VoteResult
 from src.agents.agent_provider import AgentProvider
 from src.utils.semantic_converter import SemanticConverter  # ✅ Global Import
 
@@ -15,8 +15,8 @@ from src.agents.runtime_events import emit_global_runtime_event
 from src.utils.task_util import run_task_with_timeout
 from src.utils.agents_util import get_agent_timeout
 
-from src.trading.symbol_manager import SymbolManager
-from src.agents.predict_result import PredictResult  # ✅ PredictResult Import
+from src.trading import CycleContext
+from src.agents.predict import PredictResult  # ✅ PredictResult Import
 from src.utils.logger import log
 from src.server.state import global_state
 from .runner_decorators import log_run
@@ -30,14 +30,12 @@ class DecisionStageRunner:
         self,
         config: Config,
         agent_config: AgentConfig,
-        symbol_manager: SymbolManager,
         strategy_engine: StrategyEngine,
         agent_provider: AgentProvider,
         max_position_size: float = 100.0,
     ):
         self.config = config
         self.agent_config = agent_config
-        self.symbol_manager = symbol_manager
         self.max_position_size = max_position_size
         self.agent_provider = agent_provider
         self.strategy_engine = strategy_engine
@@ -45,47 +43,36 @@ class DecisionStageRunner:
     @log_run
     async def run(
         self,
-        *,
-        run_id: str,
-        cycle_id: Optional[str],
-        processed_dfs: Dict[str, "pd.DataFrame"],
-        quant_analysis: Dict[str, Any],
-        predict_result: PredictResult,
-        reflection_text: Optional[str],
-        current_price: float,
-        current_position_info: Optional[Dict[str, Any]],
-        regime_result: Optional[Dict[str, Any]]
+        context: CycleContext
     ) -> Tuple[Dict[str, Any], str, Optional[Dict[str, Any]], Any, Dict[str, Any]]:
         """
         Build final decision payload (forced-exit/fast/LLM/rule) and convert to VoteResult.
         """
         emit_global_runtime_event(
-            run_id=run_id,
+            context,
             stream="lifecycle",
             agent="decision_router",
-            phase="start",
-            cycle_id=cycle_id,
-            symbol=self.symbol_manager.current_symbol
+            phase="start"
         )
 
         selected_agent_outputs = self._collect_selected_agent_outputs(
-            predict_result=predict_result,
-            reflection_text=reflection_text
+            predict_result=context.predict_result,
+            reflection_text=context.reflection_text
         )
-        if isinstance(quant_analysis, dict):
-            quant_analysis['agent_outputs'] = selected_agent_outputs
+        if isinstance(context.quant_analysis, dict):
+            context.quant_analysis['agent_outputs'] = selected_agent_outputs
 
         market_data = {
-            'df_5m': processed_dfs['5m'],
-            'df_15m': processed_dfs['15m'],
-            'df_1h': processed_dfs['1h'],
-            'current_price': current_price
+            'df_5m': context.processed_dfs['5m'],
+            'df_15m': context.processed_dfs['15m'],
+            'df_1h': context.processed_dfs['1h'],
+            'current_price': context.current_price
         }
-        regime_info = quant_analysis.get('regime', {})
+        regime_info = context.quant_analysis.get('regime', {})
 
         fast_signal = None
         decision_source = 'llm'
-        forced_exit = self._check_forced_exit(current_position_info)
+        forced_exit = self._check_forced_exit(context.symbol, context.current_position_info)
         llm_enabled = self._is_llm_enabled()
         if llm_enabled and getattr(self.strategy_engine, 'disable_llm', False):
             llm_enabled = bool(self.strategy_engine.reload_config())
@@ -104,7 +91,7 @@ class DecisionStageRunner:
                 level="warning"
             )
         else:
-            fast_signal = self._detect_fast_trend_signal(processed_dfs.get('5m'))
+            fast_signal = self._detect_fast_trend_signal(context.processed_dfs.get('5m'))
 
         if fast_signal:
             decision_source = 'fast_trend'
@@ -161,19 +148,20 @@ class DecisionStageRunner:
                 global_state.add_agent_message("decision_core", "🧠 DeepSeek LLM is weighing options...", level="info")
 
                 market_context_text = self._build_market_context(
-                    quant_analysis=quant_analysis,
-                    predict_result=predict_result,
+                    symbol=context.symbol,
+                    quant_analysis=context.quant_analysis,
+                    predict_result=context.predict_result,
                     market_data=market_data,
                     regime_info=regime_info,
-                    position_info=current_position_info,
+                    position_info=context.current_position_info,
                     selected_agent_outputs=selected_agent_outputs
                 )
 
                 market_context_data = {
-                    'symbol': self.symbol_manager.current_symbol,
+                    'symbol': context.symbol,
                     'timestamp': datetime.now().isoformat(),
-                    'current_price': current_price,
-                    'position_side': (current_position_info or {}).get('side')
+                    'current_price': context.current_price,
+                    'position_side': (context.current_position_info or {}).get('side')
                 }
 
                 log.info("🐂🐻 Gathering Bull/Bear perspectives in PARALLEL...")
@@ -181,14 +169,12 @@ class DecisionStageRunner:
                 loop = asyncio.get_running_loop()
                 bull_p, bear_p = await asyncio.gather(
                     run_task_with_timeout(
-                        run_id=run_id,
-                        cycle_id=cycle_id,
+                        context,
                         agent_name="bull_agent",
                         timeout_seconds=llm_perspective_timeout,
                         task_factory=lambda: loop.run_in_executor(
                             None, self.strategy_engine.get_bull_perspective, market_context_text
                         ),
-                        symbol=self.symbol_manager.current_symbol,
                         fallback={
                             "stance": "NEUTRAL",
                             "bullish_reasons": "Perspective timeout",
@@ -196,14 +182,12 @@ class DecisionStageRunner:
                         }
                     ),
                     run_task_with_timeout(
-                        run_id=run_id,
-                        cycle_id=cycle_id,
+                        context,
                         agent_name="bear_agent",
                         timeout_seconds=llm_perspective_timeout,
                         task_factory=lambda: loop.run_in_executor(
                             None, self.strategy_engine.get_bear_perspective, market_context_text
                         ),
-                        symbol=self.symbol_manager.current_symbol,
                         fallback={
                             "stance": "NEUTRAL",
                             "bearish_reasons": "Perspective timeout",
@@ -220,7 +204,7 @@ class DecisionStageRunner:
                 decision_payload = self.strategy_engine.make_decision(
                     market_context_text=market_context_text,
                     market_context_data=market_context_data,
-                    reflection=reflection_text,
+                    reflection=context.reflection_text,
                     bull_perspective=bull_p,
                     bear_perspective=bear_p
                 )
@@ -238,8 +222,8 @@ class DecisionStageRunner:
                 global_state.add_agent_message("decision_core", "⚖️ Running rule-based decision logic...", level="info")
                 decision_source = 'decision_core'
                 vote_core = await self.agent_provider.decision_core.make_decision(
-                    quant_analysis=quant_analysis,
-                    predict_result=predict_result,
+                    quant_analysis=context.quant_analysis,
+                    predict_result=context.predict_result,
                     market_data=market_data
                 )
                 size_pct = 0.0
@@ -288,13 +272,13 @@ class DecisionStageRunner:
             }
         decision_payload['action'] = normalize_action(
             decision_payload.get('action'),
-            position_side=(current_position_info or {}).get('side')
+            position_side=(context.current_position_info or {}).get('side')
         )
 
-        q_trend = quant_analysis.get('trend', {})
-        q_osc = quant_analysis.get('oscillator', {})
-        q_sent = quant_analysis.get('sentiment', {})
-        q_comp = quant_analysis.get('comprehensive', {})
+        q_trend = context.quant_analysis.get('trend', {})
+        q_osc = context.quant_analysis.get('oscillator', {})
+        q_sent = context.quant_analysis.get('sentiment', {})
+        q_comp = context.quant_analysis.get('comprehensive', {})
 
         vote_details = {
             'deepseek': decision_payload.get('confidence', 0),
@@ -306,7 +290,7 @@ class DecisionStageRunner:
             'oscillator_15m': q_osc.get('osc_15m_score', 0),
             'oscillator_5m': q_osc.get('osc_5m_score', 0),
             'sentiment': q_sent.get('total_sentiment_score', 0),
-            'prophet': predict_result.probability_up if predict_result else 0.5,
+            'prophet': context.predict_result.probability_up if context.predict_result else 0.5,
             'bull_confidence': decision_payload.get('bull_perspective', {}).get('bull_confidence', 50),
             'bear_confidence': decision_payload.get('bear_perspective', {}).get('bear_confidence', 50),
             'bull_stance': decision_payload.get('bull_perspective', {}).get('stance', 'UNKNOWN'),
@@ -320,7 +304,7 @@ class DecisionStageRunner:
             vote_details['fast_trend_volume_ratio'] = fast_signal.get('volume_ratio')
             vote_details['fast_trend_window'] = fast_signal.get('window_minutes')
 
-        trend_score_total = quant_analysis.get('trend', {}).get('total_trend_score', 0)
+        trend_score_total = context.quant_analysis.get('trend', {}).get('total_trend_score', 0)
         regime_desc = SemanticConverter.get_trend_semantic(trend_score_total)
 
         pos_pct = decision_payload.get('position_size_pct', 0)
@@ -328,7 +312,7 @@ class DecisionStageRunner:
             pos_pct = (decision_payload.get('position_size_usd') / self.max_position_size) * 100
             pos_pct = min(pos_pct, 100)
 
-        price_position_info = regime_result.get('position', {}) if regime_result else {}
+        price_position_info = context.regime_result.get('position', {}) if context.regime_result else {}
 
         vote_result = VoteResult(
             action=decision_payload.get('action', 'wait'),
@@ -345,12 +329,10 @@ class DecisionStageRunner:
         )
 
         emit_global_runtime_event(
-            run_id=run_id,
+            context,
             stream="lifecycle",
             agent="decision_router",
             phase="end",
-            cycle_id=cycle_id,
-            symbol=self.symbol_manager.current_symbol,
             data={
                 "action": vote_result.action,
                 "confidence": vote_result.confidence,
@@ -360,11 +342,11 @@ class DecisionStageRunner:
 
         return decision_payload, decision_source, fast_signal, vote_result, selected_agent_outputs
 
-    def _check_forced_exit(self, position_info: Optional[Dict]) -> Optional[Dict]:
+    def _check_forced_exit(self, symbol: str, position_info: Optional[Dict]) -> Optional[Dict]:
         """Force exit for stale or losing positions to cap drawdowns."""
         if not position_info:
             return None
-        symbol = position_info.get('symbol') or self.current_symbol
+        symbol = position_info.get('symbol') or symbol
         side = str(position_info.get('side', '')).lower()
         close_action = 'close_long' if side == 'long' else ('close_short' if side == 'short' else 'wait')
         pnl_pct = position_info.get('pnl_pct')
@@ -571,6 +553,7 @@ class DecisionStageRunner:
 
     def _build_market_context(
         self,
+        symbol: str,
         quant_analysis: Dict,
         predict_result,
         market_data: Dict,
@@ -680,7 +663,7 @@ class DecisionStageRunner:
         
         context = f"""
 ## 1. Snapshot
-- Symbol: {self.symbol_manager.current_symbol}
+- Symbol: {symbol}
 - Price: ${current_price:,.2f}
 """
 

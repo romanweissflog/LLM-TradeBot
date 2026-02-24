@@ -140,7 +140,7 @@ class MultiAgentTradingBot:
             test_mode)
         self.ai500_updater = Ai500Updater(self.symbol_manager)  # ✅ AI500 Updater
 
-        self.agent_provider.initialize(self.symbol_manager)
+        self.agent_provider.initialize(self.symbol_manager.symbols)
         
         # 🧠 DeepSeek 决策引擎
         print("[DEBUG] Creating StrategyEngine...")
@@ -155,7 +155,6 @@ class MultiAgentTradingBot:
             self.config,
             self.agent_config,
             self.client,
-            self.symbol_manager,
             self.agent_provider,
             self.strategy_engine,
             self.saver,
@@ -435,7 +434,7 @@ class MultiAgentTradingBot:
             for acc in accounts:
                 print(f"     - {acc.account_name} ({acc.exchange_type.value}, testnet={acc.testnet})")
     
-    def _begin_cycle_context(self) -> CycleContext:
+    def _begin_cycle_context(self, analyze_only: bool) -> CycleContext:
         """Initialize cycle-scoped context and emit system-start observability."""
         if hasattr(self, '_headless_mode') and self._headless_mode:
             self._terminal_display.print_log(f"🔍 Analyzing {self.symbol_manager.current_symbol}...", "INFO")
@@ -451,27 +450,29 @@ class MultiAgentTradingBot:
         cycle_num = global_state.cycle_counter
         cycle_id = global_state.current_cycle_id
         run_id = f"{cycle_id}:{self.symbol_manager.current_symbol}" if cycle_id else run_id
-        emit_global_runtime_event(
+        snapshot_id = f"snap_{int(time.time())}"
+        
+        context = CycleContext(
             run_id=run_id,
+            cycle_id=cycle_id,
+            snapshot_id=snapshot_id,
+            cycle_num=cycle_num,
+            symbol=self.symbol_manager.current_symbol,
+            analyze_only=analyze_only
+        )
+    
+        emit_global_runtime_event(
+            context,
             stream="lifecycle",
             agent="system",
             phase="start",
-            cycle_id=cycle_id,
-            symbol=self.symbol_manager.current_symbol,
             data={"cycle": cycle_num, "symbol": self.symbol_manager.current_symbol}
         )
 
         global_state.add_log(f"[📊 SYSTEM] {self.symbol_manager.current_symbol} analysis started")
         global_state.agent_messages = [msg for msg in global_state.agent_messages if msg.get('symbol') != self.symbol_manager.current_symbol]
-        snapshot_id = f"snap_{int(time.time())}"
 
-        return CycleContext(
-            run_id=run_id,
-            cycle_id=cycle_id,
-            snapshot_id=snapshot_id,
-            cycle_num=cycle_num,
-            symbol=self.symbol_manager.current_symbol
-        )
+        return context
 
     async def _run_trading_cycle(self, analyze_only: bool = False) -> Dict:
         """
@@ -483,23 +484,18 @@ class MultiAgentTradingBot:
                 'details': {...}
             }
         """
-        cycle_context: Optional[CycleContext] = None
-        run_id = f"run_{int(time.time() * 1000)}:{self.symbol_manager.current_symbol}"
+        cycle_context = self._begin_cycle_context(analyze_only)
         try:
-            cycle_context = self._begin_cycle_context()
-            run_id = cycle_context.run_id
-            return await self.runner_provider.cycle_pipeline_runner.run(context=cycle_context, analyze_only=analyze_only)
+            return await self.runner_provider.cycle_pipeline_runner.run(context=cycle_context)
         
         except Exception as e:
             log.error(f"Trading cycle exception: {e}", exc_info=True)
             global_state.add_log(f"Error: {e}")
             emit_global_runtime_event(
-                run_id=run_id,
+                cycle_context,
                 stream="error",
                 agent="system",
                 phase="error",
-                cycle_id=(cycle_context.cycle_id if cycle_context else global_state.current_cycle_id),
-                symbol=self.symbol_manager.current_symbol,
                 data={"status": "error", "error": str(e)}
             )
             return {
@@ -997,7 +993,9 @@ class MultiAgentTradingBot:
         # 🔮 启动 Prophet 自动训练器 (每 2 小时重新训练)
         from src.models.prophet_model import HAS_LIGHTGBM
         if HAS_LIGHTGBM and self.agent_config.predict_agent:
-            self.agent_provider.predict_agents_provider.start_auto_trainer()
+            self.agent_provider.predict_agents_provider.start_auto_trainer(
+                self.symbol_provider.primary_symbol,
+                self.symbol_manager.symbols[0] if self.symbol_manager.symbols else None)
         
         # 设置初始间隔 (优先使用 CLI 参数，后续 API 可覆盖)
         global_state.cycle_interval = interval_minutes

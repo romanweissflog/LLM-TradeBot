@@ -1,17 +1,19 @@
+from typing import List
 
 from src.config import Config
 from .agent_config import AgentConfig
 from src.api.binance_client import BinanceClient
-from src.trading.symbol_manager import SymbolManager
 
-from .risk_audit_agent import RiskAuditAgent
 from .quant_analyst_agent import QuantAnalystAgent
 from .regime_detector_agent import RegimeDetector
-from .data_sync_agent import DataSyncAgent
 from .multi_period_agent import MultiPeriodParserAgent
-from .predict_agents_provider import PredictAgentsProvider
-from .decision_core_agent import DecisionCoreAgent
 from .symbol_selector_agent import SymbolSelectorAgent
+from .trigger_detector_agent import TriggerDetector
+
+from .data_sync import DataSyncAgent
+from .decision_core import DecisionCoreAgent
+from .predict import PredictAgentsProvider
+from .risk_audit import RiskAuditAgent
 
 from .reflection.reflection_agent_llm import ReflectionAgentLLM
 from .reflection.reflection_agent_no_llm import ReflectionAgentNoLLM
@@ -42,11 +44,13 @@ class AgentProvider:
             min_stop_loss_pct=0.005,
             max_stop_loss_pct=0.05
         )
+        self.trigger_detector_agent = TriggerDetector()
         self.quant_analyst_agent = QuantAnalystAgent()     
         self.multi_period_agent = MultiPeriodParserAgent()
         self.decision_core_agent = DecisionCoreAgent()
         self.symbol_selector_agent = SymbolSelectorAgent()
           
+        print("  ✅ TriggerDetector ready")
         print("  ✅ DataSyncAgent ready")
         print("  ✅ QuantAnalystAgent ready")
         print("  ✅ RiskAuditAgent ready")
@@ -56,21 +60,21 @@ class AgentProvider:
 
     def initialize(
         self,
-        symbol_manager: SymbolManager
-    ):
-        self.symbol_manager = symbol_manager
-        self._set_predict_agents_provider()
+        symbols: List[str]
+    ):        
+        self._set_predict_agents_provider(symbols)
         self._set_agents()
 
     def reload(
         self,
-        client: BinanceClient
+        client: BinanceClient,
+        symbols: List[str]
     ):
         self.client = client
         self._set_agents()
 
         if self.agent_config.predict_agent:
-            self.predict_agents_provider.reload()
+            self.predict_agents_provider.reload(symbols)
         else:
             self.predict_agents_provider = None
 
@@ -83,12 +87,15 @@ class AgentProvider:
         self._set_trigger_agent()
         self._set_regime_detector_agent()
 
-    def _set_predict_agents_provider(self):
+    def _set_predict_agents_provider(
+        self,
+        symbols: List[str]
+    ):
         # 🆕 Optional Agent: PredictAgent (per symbol)
         if self.agent_config.predict_agent:
             print("[DEBUG] Creating PredictAgents...")
-            self.predict_agents_provider = PredictAgentsProvider(self.client, self.symbol_manager, self.agent_config)
-            print(f"  ✅ PredictAgent ready ({len(self.symbol_manager.symbols)} symbols)")
+            self.predict_agents_provider = PredictAgentsProvider(self.client, self.agent_config, symbols)
+            print(f"  ✅ PredictAgent ready ({len(symbols)} symbols)")
         else:
             print("  ⏭️ PredictAgent disabled")
             self.predict_agents_provider = None

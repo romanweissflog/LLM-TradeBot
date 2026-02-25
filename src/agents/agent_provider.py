@@ -42,7 +42,6 @@ class AgentProvider:
         self.symbol_selector_agent = SymbolSelectorAgent()
           
         print("  ✅ TriggerDetector ready")
-        print("  ✅ DataSyncAgent ready")
         print("  ✅ QuantAnalystAgent ready")
         print("  ✅ RiskAuditAgent ready")
         print("  ✅ MultiPeriodParserAgent ready")

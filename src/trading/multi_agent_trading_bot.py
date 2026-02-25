@@ -135,7 +135,7 @@ class MultiAgentTradingBot:
             self.client,
             self.agent_provider,
             trading_parameters.test_mode)
-        self.ai500_updater = Ai500Updater(self.symbol_manager)  # ✅ AI500 Updater
+        self.ai500_updater = Ai500Updater(self.symbol_manager, self.agent_provider)  # ✅ AI500 Updater
 
         self.agent_provider.initialize(self.symbol_manager.symbols)
         

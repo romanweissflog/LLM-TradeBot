@@ -1,3 +1,5 @@
+import pandas as pd
+
 from typing import List, Dict, Optional
 
 from src.agents.predict import PredictAgent

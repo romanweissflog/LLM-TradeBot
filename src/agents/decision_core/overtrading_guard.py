@@ -4,6 +4,7 @@ from datetime import datetime
 from src.utils.logger import log
 from src.utils.action_protocol import is_open_action
 
+from .trade_record import TradeRecord
 
 # ============================================
 # 过度交易防护 (Overtrading Guard)

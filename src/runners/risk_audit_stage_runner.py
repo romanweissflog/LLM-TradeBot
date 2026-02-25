@@ -80,7 +80,7 @@ class RiskAuditStageRunner:
             )
 
         account_balance = self._refresh_account_state_for_audit()
-        current_position =  get_current_position(self.client, self.symbol_manager.current_symbol, self.test_mode)
+        current_position =  get_current_position(self.client, context.symbol, self.test_mode)
         atr_pct = context.regime_result.get('atr_pct', None) if context.regime_result else None
 
         global_state.add_agent_message("risk_audit", "🛡️ Guardian is auditing risk and positions...", level="info")

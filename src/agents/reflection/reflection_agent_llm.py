@@ -142,7 +142,7 @@ class ReflectionAgentLLM(ReflectionAgent):
             return self.last_reflection.to_prompt_text()
         return None
     
-    def build_system_prompt(self) -> str:
+    def get_user_prompt(self) -> str:
         """Build system prompt for reflection LLM call"""
         return """You are a professional trading retrospection analyst specializing in cryptocurrency futures.
 Analyze the provided trade history and generate actionable insights to improve future trading decisions.
@@ -168,7 +168,7 @@ Output your analysis as a valid JSON object with this structure:
 
 Be specific, data-driven, and focus on patterns that can be acted upon."""
     
-    def build_user_prompt(self, trades: List[Dict]) -> str:
+    def get_user_prompt(self, trades: List[Dict]) -> str:
         """Build user prompt with trade history"""
         # Build trade table
         table_rows = []

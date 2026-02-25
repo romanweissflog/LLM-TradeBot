@@ -1,6 +1,8 @@
 import time
 import threading
 
+from src.agents.agent_provider import AgentProvider
+
 from .symbol_manager import SymbolManager
 
 from src.utils.logger import log
@@ -8,11 +10,13 @@ from src.utils.logger import log
 class Ai500Updater:
     def __init__(
         self,
-        symbol_manager: SymbolManager
+        symbol_manager: SymbolManager,
+        agent_provider: AgentProvider
     ):
         self.symbol_manager = symbol_manager
+        self.agent_provider = agent_provider
 
-        self.use_ai500 = 'AI500_TOP5' in symbol_manager.symbols and not self.use_auto3
+        self.use_ai500 = 'AI500_TOP5' in symbol_manager.symbols and not self.symbol_manager.use_auto3
         self.ai500_last_update = None
         self.ai500_update_interval = 6 * 3600  # 6 hours in seconds
         
@@ -32,7 +36,7 @@ class Ai500Updater:
                     
                     if self.use_ai500:
                         log.info("🔄 AI500 Top5 - Starting scheduled update (every 6h)")
-                        old_symbols = set(self.symbols)
+                        old_symbols = set(self.symbol_manager.symbols)
                         self.symbol_manager.update_ai500()  # This will fetch new AI500 top5 and update symbols list
                         self.ai500_last_update = time.time()
                         
@@ -45,7 +49,7 @@ class Ai500Updater:
                             for symbol in added:
                                 if symbol not in self.predict_agents:
                                     from src.agents.predict import PredictAgent
-                                    self.predict_agents[symbol] = PredictAgent(symbol=symbol)
+                                    self.agent_provider.predict_agents_provider.predict_agents[symbol] = PredictAgent(symbol=symbol)
                                     log.info(f"🆕 Initialized PredictAgent for {symbol}")
                         else:
                             log.info("✅ AI500 Updated - No changes in Top5")
